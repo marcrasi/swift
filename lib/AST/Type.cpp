@@ -4085,3 +4085,67 @@ Type TypeBase::openAnyExistentialType(ArchetypeType *&opened) {
   opened = ArchetypeType::getOpened(this);
   return opened;
 }
+
+AnyFunctionType *AnyFunctionType::getAutoDiffAdjointFunctionType(
+    const AutoDiffParameterIndices &indices, const TupleType *primalResultTy) {
+  assert(indices.getIndices().any() && "there must be at least one wrt index");
+
+  // Compute the return type of the adjoint.
+  SmallVector<TupleTypeElt, 8> retElts;
+  SmallVector<Type, 8> wrtParamTypes;
+  indices.getSubsetParamTypesInParamGroupOrder(this, wrtParamTypes);
+  for (auto wrtParamType : wrtParamTypes)
+    retElts.push_back(wrtParamType);
+
+  // If collected `retElts` has only 1 element, use that element as adjoint's
+  // return type. Otherwise, make a tuple out of `retElts` as adjoint's return
+  // type.
+  Type retTy = retElts.size() > 1
+      ? TupleType::get(retElts, getASTContext())
+      : retElts[0].getType();
+
+  // Collect one function type per parameter group.
+  AnyFunctionType *functionType = this;
+  SmallVector<AnyFunctionType*, 2> functionTypes;
+  while (functionType) {
+    functionTypes.push_back(functionType);
+    functionType = functionType->getResult()->getAs<AnyFunctionType>();
+  }
+
+  // Build the adjoint function type, starting with the result type and
+  // iteratively wrapping it in a new function type per parameter group.
+  Type adjoint = retTy;
+  for (unsigned i : reversed(range(0, functionTypes.size()))) {
+    AnyFunctionType *functionType = functionTypes[i];
+
+    // Compute the adjoint parameters at this parameter group.
+    SmallVector<AnyFunctionType::Param, 8> params;
+
+    // The first parameters are the same as those of the original function.
+    for (auto param : functionType->getParams())
+      params.push_back(param);
+
+    // If we're at the innermost parameter group, add more params: the
+    // checkpoints data structure (optional), the original result, and the seed.
+    if (i == functionTypes.size() - 1) {
+      // If the primnal exists, the checkpoints type is the primal result type.
+      if (primalResultTy) {
+        auto checkpointsTy = primalResultTy->getElement(0).getType();
+        params.push_back(AnyFunctionType::Param(checkpointsTy));
+      }
+      // The original result and the seed have the same type as the original
+      // return type.
+      params.append(2, AnyFunctionType::Param(functionType->getResult()));
+    }
+
+    // Wrap the adjoint with this new parameter group.
+    if (auto *genFunctionType = functionType->getAs<GenericFunctionType>()) {
+      adjoint = GenericFunctionType::get(
+          genFunctionType->getGenericSignature(), params, adjoint);
+      continue;
+    }
+    adjoint = FunctionType::get(params, adjoint);
+  }
+
+  return adjoint->castTo<AnyFunctionType>();
+}

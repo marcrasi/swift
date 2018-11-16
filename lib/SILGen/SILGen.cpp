@@ -698,78 +698,40 @@ emitMarkFunctionEscapeForTopLevelCodeGlobals(SILLocation loc,
 /// SWIFT_ENABLE_TENSORFLOW
 static unsigned countNumFlattenedElementTypes(Type type) {
   if (auto *tupleTy = type->getCanonicalType()->getAs<TupleType>())
-    accumulate(tupleTy->getElementTypes(), 0, [&](unsigned num, Type type) {
+    return accumulate(tupleTy->getElementTypes(), 0, [&](unsigned num, Type type) {
       return num + countNumFlattenedElementTypes(type);
     });
   return 1;
 }
 
-IntRange<unsigned> SILGenModule::
-getLoweredFunctionParameterIndex(unsigned paramIndex, AnyFunctionType *ty) {
-  // Starting from the first parameter index (0), increment `startIndex` until
-  // we find the first corresponding argument index for the given function
-  // parameter index.
-  unsigned startIndex = 0;
-  auto params = ty->getParams();
-  assert(paramIndex < params.size() && "Parameter index out of bounds!");
-  for (auto i : range(paramIndex))
-    startIndex += countNumFlattenedElementTypes(params[i].getPlainType());
-  // Compute the offset from the given parameter's first corresponding argument
-  // index to the last corresponding argument index.
-  unsigned offset = countNumFlattenedElementTypes(
-      params[paramIndex].getPlainType());
-  return range(startIndex, startIndex + offset);
-}
+llvm::SmallBitVector SILGenModule::getLoweredAutoDiffParameterIndices(
+    const AnyFunctionType *functionType,
+    const AutoDiffParameterIndices &indices) {
+  SmallVector<Type, 8> allParamTypes;
+  AutoDiffParameterIndices::getAllParamTypesInBitOrder(functionType,
+                                                       allParamTypes);
 
-/// SWIFT_ENABLE_TENSORFLOW
-/// Given a @differentiable attribute and the function declaration that holds
-/// this attribute, this function returns the lowered (SIL) parameter indices
-/// to differentiate with respect to.
-static llvm::SmallBitVector getLoweredAutoDiffParameterIndices(
-    SILGenModule &SGM, const AbstractFunctionDecl *AFD, const SILFunction *F,
-    const DifferentiableAttr *DA) {
-  auto *fnTy =
-    AFD->getInterfaceType()->getCanonicalType()->getAs<AnyFunctionType>();
-  // If the function has a self parameter, then its signature is
-  //   (Self) -> ...
-  // Strip off the (Self) parameter list so that indexing can index into the
-  // next parameter list.
-  if (AFD->getImplicitSelfDecl())
-    fnTy = fnTy->getResult()->getAs<AnyFunctionType>();
-
-  llvm::SmallBitVector indices(F->getLoweredFunctionType()->getNumParameters());
-  // If no parameters are specified, add all parameter indices except the self
-  // parameter.
-  if (DA->getParameters().empty()) {
-    if (F->hasSelfParam())
-      // 'self' is always the last SIL parameter.
-      indices.set(0, indices.size() - 1);
-    else
-      indices.set();
+  SmallVector<unsigned, 8> paramLoweredSizes;
+  unsigned totalLoweredSize = 0;
+  for (auto param : allParamTypes) {
+    unsigned paramLoweredSize = countNumFlattenedElementTypes(param);
+    paramLoweredSizes.push_back(paramLoweredSize);
+    totalLoweredSize += paramLoweredSize;
   }
-  // Otherwise, convert differentiation parameters.
-  else {
-    for (auto param : DA->getParameters()) {
-      switch (param.getKind()) {
-      // Normal index maps directly to a SIL parameter index.
-      case AutoDiffParameter::Kind::Index: {
-        auto idx = param.getIndex();
-        auto paramIdxRange = SGM.getLoweredFunctionParameterIndex(idx, fnTy);
-        if (paramIdxRange.size() == 1)
-          indices.set(paramIdxRange.front());
-        else
-          indices.set(paramIdxRange.front(), paramIdxRange.back());
-        break;
-      }
-      case AutoDiffParameter::Kind::Self:
-        // Sema guarantees this case to occur at most once.
-        // 'self' is always the last SIL parameter.
-        indices.set(indices.size() - 1);
-        break;
-      }
+
+  // Set bits corresponding to the selected parameters.
+  llvm::SmallBitVector loweredIndices(totalLoweredSize);
+  unsigned currentBitIndex = 0;
+  for (unsigned i : range(paramLoweredSizes.size())) {
+    unsigned paramLoweredSize = paramLoweredSizes[i];
+    if (indices.getIndices()[i]) {
+      loweredIndices.set(currentBitIndex,
+                         currentBitIndex + paramLoweredSize);
     }
+    currentBitIndex += paramLoweredSize;
   }
-  return indices;
+
+  return loweredIndices;
 }
 
 void SILGenModule::emitAbstractFuncDecl(AbstractFunctionDecl *AFD) {
@@ -833,9 +795,9 @@ void SILGenModule::emitAbstractFuncDecl(AbstractFunctionDecl *AFD) {
                "Primal cannot be present if adjoint is not");
       }
       // Get lowered argument indices.
-      auto paramIndices =
-          getLoweredAutoDiffParameterIndices(*this, AFD, silOriginalFn,
-                                             diffAttr);
+      auto paramIndices = getLoweredAutoDiffParameterIndices(
+          AFD->getInterfaceType()->castTo<AnyFunctionType>(),
+          *diffAttr->getCheckedParameterIndices());
       SILAutoDiffIndices indices(/*source*/ 0, paramIndices);
       silOriginalFn->addReverseDifferentiableAttr(
           SILReverseDifferentiableAttr::create(

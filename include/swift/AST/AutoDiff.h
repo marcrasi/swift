@@ -79,6 +79,87 @@ public:
 };
 
 class AnyFunctionType;
+class Type;
+
+/// Identifies a subset of a function's parameters.
+///
+/// Works with AST-level function decls and types. Requires further lowering to
+/// work with SIL-level functions and types. (In particular, tuples must be
+/// exploded).
+class AutoDiffParameterIndices {
+  /// Bits corresponding to parameters in the set are "on", and bits
+  /// corresponding to parameters not in the set are "off".
+  ///
+  /// When the function is curried, bits corresponding to all parameter groups
+  /// are flattened together in reverse order. For example,
+  ///
+  ///   Function type: (A, B) -> (C, D) -> R
+  ///   Bits: [C][D][A][B]
+  ///
+  ///   Function type: (Self) -> (A, B) -> R
+  ///   Bits: [A][B][Self]
+  ///
+  llvm::SmallBitVector indices;
+
+  AutoDiffParameterIndices(unsigned indicesSize) : indices(indicesSize) {}
+
+public:
+  /// Allocates and initializes an empty `AutoDiffParameterIndices` for the
+  /// given `functionType`.
+  static AutoDiffParameterIndices *create(ASTContext &C,
+                                          AnyFunctionType *functionType);
+
+  /// Pushes all of `functionType`'s parameters into `paramTypes` in the same
+  /// order in which they appear in the bitvector. If `functionType` is curried,
+  /// includes parameters from all parameter groups. For example, if
+  ///
+  ///   functionType = (A, B) -> (C, D, E) -> R
+  ///
+  /// then pushes {C, D, E, A, B} to `paramTypes`.
+  ///
+  static void getAllParamTypesInBitOrder(const AnyFunctionType *functionType,
+                                         SmallVectorImpl<Type> &paramTypes);
+
+  /// Given a `functionType`, a `groupIndex` that indexes a parameter group in
+  /// that function type, and given a vector of `paramIndicesInGroup` that index
+  /// parameters within that group, adds the indexed parameters to the set. For
+  /// example, if
+  ///
+  ///   functionType = (A, B) -> (C, D, E) -> R
+  ///   groupIndex = 1
+  ///   paramIndicesInGroup = {0, 2}
+  ///
+  /// then adds "C" and "E" to the set.
+  ///
+  void setParamsInGroup(const AnyFunctionType *functionType, unsigned groupIndex,
+                        const SmallVectorImpl<unsigned> &paramIndicesInGroup);
+
+  /// Given a `functionType` and a `groupIndex` that indexes a parameter group
+  /// in that function type, adds all the parameters from that group to the set.
+  /// For example, if
+  ///
+  ///   functionType = (A, B) -> (C, D, E) -> R
+  ///   groupIndex = 0
+  ///
+  /// then adds "A" and "B" to the set.
+  ///
+  void setAllParamsInGroup(const AnyFunctionType *functionType, unsigned groupIndex);
+
+  /// Pushes all of the parameters that are in the set to `paramTypes`, in the
+  /// same order in which they appear in the AST function signature. For
+  /// example, if
+  ///
+  ///   functionType = (A, B) -> (C, D, E) -> R
+  ///   and if "A", "D", and "E" are in the set
+  ///
+  /// then pushes {A, D, E} to `paramTypes`.
+  ///
+  void getSubsetParamTypesInParamGroupOrder(
+      const AnyFunctionType *functionType,
+      SmallVectorImpl<Type> &paramTypes) const;
+
+  const llvm::SmallBitVector &getIndices() const { return indices; }
+};
 
 /// Differentiability of a function specifies the differentiation mode,
 /// parameter indices at which the function is differentiable with respect to,

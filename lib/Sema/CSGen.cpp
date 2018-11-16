@@ -1310,19 +1310,17 @@ namespace {
         return nullptr;
       }
 
-      // Compute the gradient type.
-      auto originalParams = originalTy->getParams();
-      auto *genSig = originalTy->getOptGenericSignature();
-      // Collect differentiation parameter types.
-      SmallVector<TupleTypeElt, 8> diffParamTypes;
+      // Collect differentiation parameter indices.
+      AutoDiffParameterIndices *checkedWrtParamIndices =
+          AutoDiffParameterIndices::create(CS.getASTContext(), originalTy);
+
       // If no parameters are given, then differentiation is done with respect to
-      // all parameters (except self). The gradient's result type is all of the
-      // original parameters' types.
+      // all parameters in the first parameter group.
       if (GE->getParameters().empty())
-        for (auto &originalParam : originalParams)
-          diffParamTypes.push_back(originalParam.getPlainType());
-      // If parameters are specified, collect and type-check those parameters.
+        checkedWrtParamIndices->setAllParamsInGroup(originalTy, 0);
+      // If parameters indices are specified, collect those parameters.
       else {
+        SmallVector<unsigned, 8> parameterIndices;
         int lastIndex = -1;
         for (auto &param : GE->getParameters()) {
           auto index = param.index;
@@ -1334,32 +1332,47 @@ namespace {
           }
           // Indices cannot exceed the number of parameters in the original
           // function.
-          if (index >= originalParams.size()) {
+          if (index >= originalTy->getNumParams()) {
             TC.diagnose(param.loc,
                         diag::gradient_expr_parameter_index_out_of_bounds,
-                        originalTy, originalParams.size());
+                        originalTy, originalTy->getNumParams());
             return nullptr;
           }
-          // The parameter cannot be a reference object or a protocol
-          // existential.
-          auto paramTy = originalParams[index].getPlainType();
-          if (paramTy->isAnyClassReferenceType() ||
-              paramTy->isExistentialType()) {
-            TC.diagnose(param.loc, diag::gradient_expr_parameter_not_value_type,
-                        paramTy);
-            return nullptr;
-          }
+          parameterIndices.push_back(index);
           lastIndex = index;
-          diffParamTypes.push_back(paramTy);
+        }
+        checkedWrtParamIndices->setParamsInGroup(originalTy, 0,
+                                                 parameterIndices);
+      }
+
+      // Collect differentiation parameter types.
+      SmallVector<Type, 8> diffParamTypes;
+      SmallVector<TupleTypeElt, 8> resultTypes;
+      checkedWrtParamIndices->getSubsetParamTypesInParamGroupOrder(
+          originalTy, diffParamTypes);
+      resultTypes.append(diffParamTypes.begin(), diffParamTypes.end());
+
+      // Check that the differentiation parameter types are allowed.
+      for (auto paramAndParamTy : zip(GE->getParameters(), diffParamTypes)) {
+        auto param = std::get<0>(paramAndParamTy);
+        auto paramTy = std::get<1>(paramAndParamTy);
+        if (paramTy->isAnyClassReferenceType() ||
+            paramTy->isExistentialType()) {
+          TC.diagnose(param.loc, diag::gradient_expr_parameter_not_value_type,
+                      paramTy);
+          return nullptr;
         }
       }
+
+      // Memorize `checkedWrtParamIndices` in the expr.
+      GE->setCheckedParameterIndices(checkedWrtParamIndices);
 
       // Create a type for the gradient. The gradient has the same generic
       // signature as the original function. The gradient's result types are
       // what we collected in `diffParamTypes`.
-      Type gradResult = diffParamTypes.size() == 1
-        ? diffParamTypes.front().getType()
-        : TupleType::get(diffParamTypes, TC.Context);
+      Type gradResult = resultTypes.size() == 1
+        ? resultTypes.front().getType()
+        : TupleType::get(resultTypes, TC.Context);
       // If preserving original result, then the gradient's result type is a tuple
       // of the original result type with label "value" and `diffParamTypes` with
       // label "gradient".
@@ -1371,11 +1384,12 @@ namespace {
         }, TC.Context);
       }
       AnyFunctionType *gradTy;
+      auto *genSig = originalTy->getOptGenericSignature();
       if (genSig)
-        gradTy = GenericFunctionType::get(genSig, originalParams,
+        gradTy = GenericFunctionType::get(genSig, originalTy->getParams(),
                                           gradResult, originalTy->getExtInfo());
       else
-        gradTy = FunctionType::get(originalParams, gradResult,
+        gradTy = FunctionType::get(originalTy->getParams(), gradResult,
                                    originalTy->getExtInfo());
 
       // Gradient expressions with generic originals must have a type that is
