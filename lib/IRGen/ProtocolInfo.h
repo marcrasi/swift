@@ -42,17 +42,21 @@ class WitnessTableEntry {
 public:
   llvm::PointerUnion<Decl *, TypeBase *> MemberOrAssociatedType;
   ProtocolDecl *Protocol;
+  // SWIFT_ENABLE_TENSORFLOW
+  SILDeclRef declRef;
 
   WitnessTableEntry(llvm::PointerUnion<Decl *, TypeBase *> member,
-                    ProtocolDecl *protocol)
-    : MemberOrAssociatedType(member), Protocol(protocol) {}
+                    // SWIFT_ENABLE_TENSORFLOW
+                    ProtocolDecl *protocol, SILDeclRef declRef)
+    : MemberOrAssociatedType(member), Protocol(protocol), declRef(declRef) {}
 
 public:
   WitnessTableEntry() = default;
 
   static WitnessTableEntry forOutOfLineBase(ProtocolDecl *proto) {
     assert(proto != nullptr);
-    return WitnessTableEntry({}, proto);
+    // SWIFT_ENABLE_TENSORFLOW
+    return WitnessTableEntry({}, proto, SILDeclRef());
   }
 
   /// Is this a base-protocol entry?
@@ -75,9 +79,10 @@ public:
     return Protocol;
   }
 
-  static WitnessTableEntry forFunction(AbstractFunctionDecl *func) {
-    assert(func != nullptr);
-    return WitnessTableEntry(func, nullptr);
+  // SWIFT_ENABLE_TENSORFLOW
+  static WitnessTableEntry forFunction(SILDeclRef declRef) {
+    auto *func = cast<AbstractFunctionDecl>(declRef.getDecl());
+    return WitnessTableEntry(func, nullptr, declRef);
   }
   
   bool isFunction() const {
@@ -85,10 +90,11 @@ public:
     return Protocol == nullptr && decl && isa<AbstractFunctionDecl>(decl);
   }
 
-  bool matchesFunction(AbstractFunctionDecl *func) const {
-    assert(func != nullptr);
+  // SWIFT_ENABLE_TENSORFLOW
+  bool matchesFunction(SILDeclRef otherDeclRef) const {
+    auto *func = cast<AbstractFunctionDecl>(otherDeclRef.getDecl());
     if (auto decl = MemberOrAssociatedType.dyn_cast<Decl*>())
-      return decl == func && Protocol == nullptr;
+      return decl == func && Protocol == nullptr && declRef == otherDeclRef;
     return false;
   }
 
@@ -99,7 +105,8 @@ public:
   }
 
   static WitnessTableEntry forAssociatedType(AssociatedType ty) {
-    return WitnessTableEntry(ty.getAssociation(), nullptr);
+    // SWIFT_ENABLE_TENSORFLOW
+    return WitnessTableEntry(ty.getAssociation(), nullptr, SILDeclRef());
   }
   
   bool isAssociatedType() const {
@@ -122,7 +129,9 @@ public:
 
   static WitnessTableEntry forAssociatedConformance(AssociatedConformance conf){
     return WitnessTableEntry(conf.getAssociation().getPointer(),
-                             conf.getAssociatedRequirement());
+                             // SWIFT_ENABLE_TENSORFLOW
+                             conf.getAssociatedRequirement(),
+                             SILDeclRef());
   }
 
   bool isAssociatedConformance() const {
@@ -236,10 +245,11 @@ public:
 
   /// Return the witness index for the witness function for the given
   /// function requirement.
-  WitnessIndex getFunctionIndex(AbstractFunctionDecl *function) const {
+  // SWIFT_ENABLE_TENSORFLOW
+  WitnessIndex getFunctionIndex(SILDeclRef declRef) const {
     assert(getKind() >= ProtocolInfoKind::Full);
     for (auto &witness : getWitnessEntries()) {
-      if (witness.matchesFunction(function))
+      if (witness.matchesFunction(declRef))
         return getNonBaseWitnessIndex(&witness);
     }
     llvm_unreachable("didn't find entry for function");

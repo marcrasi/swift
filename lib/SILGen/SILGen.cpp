@@ -767,6 +767,31 @@ void SILGenModule::emitAbstractFuncDecl(AbstractFunctionDecl *AFD) {
           SILDifferentiableAttr::create(
             M, indices, primName, adjName,
             /*primitive*/ hasPrimitiveAdjoint, jvpName, vjpName));
+
+      // Register the JVP and VJP as "emitted" so that the witness table emitter
+      // finds them.
+      // TODO: We shoulde emit blank JVP and VJP functions in SILGen when
+      // they're not user-specified, so that the witness table can also have
+      // with non-user-specified functions.
+      // auto originalDeclRef = SILDeclRef(AFD);
+      // if (auto *jvpFnDecl = diffAttr->getJVPFunction()) {
+      //   auto declRef = originalDeclRef.asAutoDiffAssociatedFunction(
+      //       AutoDiffAssociatedFunctionIdentifier::get(
+      //           AutoDiffAssociatedFunctionKind::JVP,
+      //           diffAttr->getCheckedParameterIndices(),
+      //           AFD->getASTContext()));
+      //   emittedFunctions[declRef] = getFunction(SILDeclRef(jvpFnDecl),
+      //                                           ForDefinition);
+      // }
+      // if (auto *vjpFnDecl = diffAttr->getVJPFunction()) {
+      //   auto declRef = originalDeclRef.asAutoDiffAssociatedFunction(
+      //       AutoDiffAssociatedFunctionIdentifier::get(
+      //           AutoDiffAssociatedFunctionKind::VJP,
+      //           diffAttr->getCheckedParameterIndices(),
+      //           AFD->getASTContext()));
+      //   emittedFunctions[declRef] = getFunction(SILDeclRef(vjpFnDecl),
+      //                                           ForDefinition);
+      // }
       break;
     }
     }

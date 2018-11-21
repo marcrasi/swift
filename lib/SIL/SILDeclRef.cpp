@@ -112,10 +112,15 @@ bool swift::requiresForeignEntryPoint(ValueDecl *vd) {
 }
 
 SILDeclRef::SILDeclRef(ValueDecl *vd, SILDeclRef::Kind kind,
-                       bool isCurried, bool isForeign)
+                       bool isCurried, bool isForeign,
+                       // SWIFT_ENABLE_TENSORFLOW
+                       AutoDiffAssociatedFunctionIdentifier
+                           *autoDiffAssociatedFunctionIdentifier)
   : loc(vd), kind(kind),
     isCurried(isCurried), isForeign(isForeign),
-    isDirectReference(0), defaultArgIndex(0)
+    isDirectReference(0), defaultArgIndex(0),
+    // SWIFT_ENABLE_TENSORFLOW
+    autoDiffAssociatedFunctionIdentifier(autoDiffAssociatedFunctionIdentifier)
 {}
 
 SILDeclRef::SILDeclRef(SILDeclRef::Loc baseLoc,
@@ -558,6 +563,18 @@ EffectsKind SILDeclRef::getEffectsAttribute() const {
   return MA->getKind();
 }
 
+// SWIFT_ENABLE_TENSORFLOW
+Type SILDeclRef::getDeclInterfaceType(LookupConformanceFn lookupConformance) const {
+  auto underlying = getDecl()->getInterfaceType();
+  if (kind == Kind::AutoDiffAssociatedFunction) {
+    return underlying->castTo<AnyFunctionType>()
+        ->getAutoDiffAssociatedFunctionType(
+            *autoDiffAssociatedFunctionIdentifier->getParameterIndices(), 1,
+            autoDiffAssociatedFunctionIdentifier->getKind(), lookupConformance);
+  }
+  return underlying;
+}
+
 bool SILDeclRef::isForeignToNativeThunk() const {
   // Non-decl entry points are never natively foreign, so they would never
   // have a foreign-to-native thunk.
@@ -716,6 +733,13 @@ std::string SILDeclRef::mangle(ManglingKind MKind) const {
   case SILDeclRef::Kind::StoredPropertyInitializer:
     assert(!isCurried);
     return mangler.mangleInitializerEntity(cast<VarDecl>(getDecl()), SKind);
+
+  // SWIFT_ENABLE_TENSORFLOW
+  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
+    assert(!isCurried);
+    return mangler.mangleAutoDiffEntity(getDecl(),
+                                        autoDiffAssociatedFunctionIdentifier,
+                                        SKind);
   }
 
   llvm_unreachable("bad entity kind!");

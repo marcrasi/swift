@@ -3050,7 +3050,7 @@ public:
 
   AnyFunctionType *getAutoDiffAssociatedFunctionType(
       const AutoDiffParameterIndices &indices, unsigned differentiationOrder,
-      AutoDiffAssociatedFunctionKind kind);
+      AutoDiffAssociatedFunctionKind kind, LookupConformanceFn lookupConformance);
   AnyFunctionType *
   getAutoDiffAdjointFunctionType(const AutoDiffParameterIndices &indices,
                                  const TupleType *primalResultTy);

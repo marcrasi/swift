@@ -325,8 +325,9 @@ public:
     if (!reqAccessor) {
       if (auto witness = asDerived().getWitness(requirementRef.getDecl())) {
         return addMethodImplementation(requirementRef,
-                                       SILDeclRef(witness.getDecl(),
-                                                  requirementRef.kind),
+                                       // SWIFT_ENABLE_TENSORFLOW
+                                       requirementRef.withDecl(
+                                           witness.getDecl()),
                                        witness);
       }
 
@@ -346,8 +347,8 @@ public:
       return asDerived().addMissingMethod(requirementRef);
 
     return addMethodImplementation(requirementRef,
-                                   SILDeclRef(witnessAccessor,
-                                              SILDeclRef::Kind::Func),
+                                   // SWIFT_ENABLE_TENSORFLOW
+                                   requirementRef.withDecl(witnessAccessor),
                                    witness);
   }
 
@@ -605,7 +606,6 @@ SILFunction *SILGenModule::emitProtocolWitness(
   // Mapping from the requirement's generic signature to the witness
   // thunk's generic signature.
   auto reqtSubMap = witness.getRequirementToSyntheticSubs();
-
   // The generic environment for the witness thunk.
   auto *genericEnv = witness.getSyntheticEnvironment();
 
@@ -668,7 +668,7 @@ SILFunction *SILGenModule::emitProtocolWitness(
   auto manglingConformance =
       conformance.isConcrete() ? conformance.getConcrete() : nullptr;
   std::string nameBuffer =
-      NewMangler.mangleWitnessThunk(manglingConformance, requirement.getDecl());
+      NewMangler.mangleWitnessThunk(manglingConformance, requirement);
 
   // If the thunked-to function is set to be always inlined, do the
   // same with the witness, on the theory that the user wants all

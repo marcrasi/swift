@@ -332,6 +332,21 @@ void SILDeclRef::print(raw_ostream &OS) const {
   case SILDeclRef::Kind::StoredPropertyInitializer:
     OS << "!propertyinit";
     break;
+  // SWIFT_ENABLE_TENSORFLOW
+  case SILDeclRef::Kind::AutoDiffAssociatedFunction: {
+    OS << "!adfunc" << ".";
+    switch (autoDiffAssociatedFunctionIdentifier->getKind()) {
+    case AutoDiffAssociatedFunctionKind::JVP:
+      OS << "jvp";
+      break;
+    case AutoDiffAssociatedFunctionKind::VJP:
+      OS << "vjp";
+      break;
+    }
+    OS << ".";
+    OS << autoDiffAssociatedFunctionIdentifier->getParameterIndices()
+       ->getString();
+  }
   }
 
   auto uncurryLevel = getParameterListCount() - 1;
@@ -2983,7 +2998,9 @@ void SILWitnessTable::Entry::print(llvm::raw_ostream &out, bool verbose,
         methodWitness.Requirement.getDecl()
             ->getDeclContext()
             ->getParentModule();
-    methodWitness.Requirement.getDecl()->getInterfaceType().print(
+    // SWIFT_ENABLE_TENSORFLOW
+    auto lookupConformance = LookUpConformanceInModule(methodWitness.Witness->getModule().getSwiftModule());
+    methodWitness.Requirement.getDeclInterfaceType(lookupConformance).print(
         out, QualifiedSILTypeOptions);
     out << " : ";
     if (methodWitness.Witness) {

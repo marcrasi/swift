@@ -29,6 +29,7 @@
 #include "swift/Basic/Defer.h"
 #include "swift/Demangling/ManglingUtils.h"
 #include "swift/Demangling/Demangler.h"
+#include "swift/SIL/SILDeclRef.h"  // SWIFT_ENABLE_TENSORFLOW
 #include "swift/Strings.h"
 #include "clang/Basic/CharInfo.h"
 #include "clang/AST/Attr.h"
@@ -103,6 +104,26 @@ std::string ASTMangler::mangleEntity(const ValueDecl *decl, bool isCurried,
   appendEntity(decl);
   if (isCurried)
     appendOperator("Tc");
+  appendSymbolKind(SKind);
+  return finalize();
+}
+
+// SWIFT_ENABLE_TENSORFLOW
+// TODO: Proper mangling for AutoDiff entities.
+std::string ASTMangler::mangleAutoDiffEntity(
+    const ValueDecl *decl,
+    const AutoDiffAssociatedFunctionIdentifier *identifier, SymbolKind SKind) {
+  beginMangling();
+  switch (identifier->getKind()) {
+  case AutoDiffAssociatedFunctionKind::JVP:
+    appendIdentifier("jvp");
+    break;
+  case AutoDiffAssociatedFunctionKind::VJP:
+    appendIdentifier("vjp");
+    break;
+  }
+  appendIdentifier(identifier->getParameterIndices()->getString() + " ");
+  appendEntity(decl);
   appendSymbolKind(SKind);
   return finalize();
 }
@@ -214,8 +235,27 @@ std::string ASTMangler::mangleWitnessTable(const NormalProtocolConformance *C) {
 }
 
 std::string ASTMangler::mangleWitnessThunk(const ProtocolConformance *Conformance,
-                                           const ValueDecl *Requirement) {
+                                           // SWIFT_ENABLE_TENSORFLOW
+                                           const SILDeclRef &member) {
   beginMangling();
+
+  // SWIFT_ENABLE_TENSORFLOW
+  // TODO: Proper mangling for auto diff associated function witness thunks.
+  if (member.kind == SILDeclRef::Kind::AutoDiffAssociatedFunction) {
+    auto &identifier = *member.autoDiffAssociatedFunctionIdentifier;
+    switch (identifier.getKind()) {
+    case AutoDiffAssociatedFunctionKind::JVP:
+      appendIdentifier("jvp");
+      break;
+    case AutoDiffAssociatedFunctionKind::VJP:
+      appendIdentifier("vjp");
+      break;
+    }
+    appendIdentifier(identifier.getParameterIndices()->getString() + " ");
+  }
+
+  auto Requirement = member.getDecl();
+
   // Concrete witness thunks get a special mangling.
   if (Conformance)
     appendProtocolConformance(Conformance);

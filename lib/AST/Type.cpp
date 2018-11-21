@@ -4152,7 +4152,7 @@ AnyFunctionType *AnyFunctionType::getAutoDiffAdjointFunctionType(
 
 AnyFunctionType *AnyFunctionType::getAutoDiffAssociatedFunctionType(
     const AutoDiffParameterIndices &indices, unsigned differentiationOrder,
-    AutoDiffAssociatedFunctionKind kind) {
+    AutoDiffAssociatedFunctionKind kind, LookupConformanceFn lookupConformance) {
   // JVP: (T...) -> ((R...),
   //                 (T.TangentVector...) -> (R.TangentVector...))
   // VJP: (T...) -> ((R...),
@@ -4165,17 +4165,26 @@ AnyFunctionType *AnyFunctionType::getAutoDiffAssociatedFunctionType(
   assert(differentiationOrder == 1 && "only order 1 currently supported");
   assert(!indices.isEmpty() && "there must be at least one wrt index");
 
-  auto getAssociatedType = [this](CanType type, StringRef name) -> CanType {
-    auto *nomTy = type->getAnyNominal();
-    assert(nomTy);
-    auto *assocTyDecl =
-        nomTy->lookupDirect(getASTContext().getIdentifier(name)).front();
-    auto assocTy = assocTyDecl->getInterfaceType()
-                       ->castTo<MetatypeType>()
-                       ->getMetatypeInstanceType();
-    auto subMap = type->getMemberSubstitutionMap(
-        assocTyDecl->getModuleContext(), assocTyDecl);
-    return assocTy.subst(subMap)->getCanonicalType();
+  auto &ctx = getASTContext();
+
+  auto *differentiableProtocol =
+      ctx.getProtocol(KnownProtocolKind::Differentiable);
+  assert(differentiableProtocol && "could not find differentiable protocol");
+  auto tangentLookup = differentiableProtocol->lookupDirect(
+      ctx.getIdentifier("TangentVector"));
+  assert(tangentLookup.size() == 1);
+  auto *tangentAssocTypeDecl = cast<AssociatedTypeDecl>(tangentLookup[0]);
+  auto cotangentLookup = differentiableProtocol->lookupDirect(
+      ctx.getIdentifier("CotangentVector"));
+  assert(cotangentLookup.size() == 1);
+  auto *cotangentAssocTypeDecl = cast<AssociatedTypeDecl>(cotangentLookup[0]);
+
+  auto getAssociatedType = [&](Type type,
+                               AssociatedTypeDecl *assocTypeDecl) -> CanType {
+    return assocTypeDecl->getDeclaredInterfaceType()
+        ->castTo<DependentMemberType>()
+        ->substBaseType(type, lookupConformance)
+        ->getCanonicalType();
   };
 
   SmallVector<Type, 8> wrtParamTypes;
@@ -4198,22 +4207,22 @@ AnyFunctionType *AnyFunctionType::getAutoDiffAssociatedFunctionType(
     SmallVector<AnyFunctionType::Param, 8> differentialParams;
     for (auto wrtParamType : wrtParamTypes)
       differentialParams.push_back(AnyFunctionType::Param(getAssociatedType(
-          wrtParamType->getCanonicalType(), "TangentVector")));
+          wrtParamType, tangentAssocTypeDecl)));
 
     SmallVector<TupleTypeElt, 8> differentialResults;
     if (auto *resultTuple = originalResult->getAs<TupleType>())
       for (auto &resultTupleElt : resultTuple->getElements())
         differentialResults.push_back(getAssociatedType(
-            resultTupleElt.getType()->getCanonicalType(), "TangentVector"));
+            resultTupleElt.getType(), tangentAssocTypeDecl));
     else
       differentialResults.push_back(getAssociatedType(
-          originalResult->getCanonicalType(), "TangentVector"));
+          originalResult, tangentAssocTypeDecl));
     Type differentialResult =
         differentialResults.size() > 1
             ? TupleType::get(differentialResults, getASTContext())
             : differentialResults[0].getType();
 
-    closure = makeFunctionType(this, differentialParams, differentialResult);
+    closure = FunctionType::get(differentialParams, differentialResult);
     break;
   }
   case AutoDiffAssociatedFunctionKind::VJP: {
@@ -4223,20 +4232,20 @@ AnyFunctionType *AnyFunctionType::getAutoDiffAssociatedFunctionType(
     if (auto *resultTuple = originalResult->getAs<TupleType>())
       for (auto &resultTupleElt : resultTuple->getElements())
         pullbackParams.push_back(AnyFunctionType::Param(getAssociatedType(
-            resultTupleElt.getType()->getCanonicalType(), "CotangentVector")));
+            resultTupleElt.getType(), cotangentAssocTypeDecl)));
     else
       pullbackParams.push_back(AnyFunctionType::Param(getAssociatedType(
-          originalResult->getCanonicalType(), "CotangentVector")));
+          originalResult, cotangentAssocTypeDecl)));
 
     SmallVector<TupleTypeElt, 8> pullbackResults;
     for (auto wrtParamType : wrtParamTypes)
       pullbackResults.push_back(getAssociatedType(
-          wrtParamType->getCanonicalType(), "CotangentVector"));
+          wrtParamType, cotangentAssocTypeDecl));
     Type pullbackResult = pullbackResults.size() > 1
                               ? TupleType::get(pullbackResults, getASTContext())
                               : pullbackResults[0].getType();
 
-    closure = makeFunctionType(this, pullbackParams, pullbackResult);
+    closure = FunctionType::get(pullbackParams, pullbackResult);
     break;
   }
   }

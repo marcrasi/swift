@@ -24,6 +24,8 @@ class NamedDecl;
 namespace swift {
 
 class AbstractClosureExpr;
+// SWIFT_ENABLE_TENSORFLOW
+struct SILDeclRef;
 
 namespace Mangle {
 
@@ -71,6 +73,11 @@ public:
   std::string mangleEntity(const ValueDecl *decl, bool isCurried,
                            SymbolKind SKind = SymbolKind::Default);
 
+  // SWIFT_ENABLE_TENSORFLOW
+  std::string mangleAutoDiffEntity(
+      const ValueDecl *decl,
+      const AutoDiffAssociatedFunctionIdentifier *identifier, SymbolKind SKind);
+
   std::string mangleDestructorEntity(const DestructorDecl *decl,
                                      bool isDeallocating, SymbolKind SKind);
 
@@ -108,7 +115,8 @@ public:
   std::string mangleWitnessTable(const NormalProtocolConformance *C);
 
   std::string mangleWitnessThunk(const ProtocolConformance *Conformance,
-                                 const ValueDecl *Requirement);
+                                 // SWIFT_ENABLE_TENSORFLOW
+                                 const SILDeclRef &member);
 
   std::string mangleClosureWitnessThunk(const ProtocolConformance *Conformance,
                                         const AbstractClosureExpr *Closure);

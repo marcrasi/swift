@@ -1501,6 +1501,8 @@ static CanSILFunctionType getNativeSILFunctionType(
     case SILDeclRef::Kind::StoredPropertyInitializer:
     case SILDeclRef::Kind::IVarInitializer:
     case SILDeclRef::Kind::IVarDestroyer:
+    // SWIFT_ENABLE_TENSORFLOW
+    case SILDeclRef::Kind::AutoDiffAssociatedFunction:
       return getSILFunctionType(M, origType, substInterfaceType, extInfo,
                                 getNormalArgumentConvention(M), ForeignInfo(),
                                 origConstant, constant, reqtSubs,
@@ -2024,6 +2026,8 @@ static SelectorFamily getSelectorFamily(SILDeclRef c) {
   case SILDeclRef::Kind::Destroyer:
   case SILDeclRef::Kind::Deallocator:
   case SILDeclRef::Kind::IVarDestroyer:
+  // SWIFT_ENABLE_TENSORFLOW
+  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
     return SelectorFamily::None;
 
   case SILDeclRef::Kind::EnumElement:
@@ -2275,6 +2279,8 @@ TypeConverter::getDeclRefRepresentation(SILDeclRef c) {
       return SILFunctionTypeRepresentation::Thin;
 
     case SILDeclRef::Kind::Func:
+    // SWIFT_ENABLE_TENSORFLOW
+    case SILDeclRef::Kind::AutoDiffAssociatedFunction:
       if (c.getDecl()->getDeclContext()->isTypeContext())
         return SILFunctionTypeRepresentation::Method;
       // SWIFT_ENABLE_TENSORFLOW
@@ -2811,6 +2817,8 @@ static AbstractFunctionDecl *getBridgedFunction(SILDeclRef declRef) {
   case SILDeclRef::Kind::StoredPropertyInitializer:
   case SILDeclRef::Kind::IVarInitializer:
   case SILDeclRef::Kind::IVarDestroyer:
+  // SWIFT_ENABLE_TENSORFLOW
+  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
     return nullptr;
   }
   llvm_unreachable("bad SILDeclRef kind");

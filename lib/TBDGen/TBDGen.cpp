@@ -136,7 +136,9 @@ void TBDGenVisitor::addConformances(DeclContext *DC) {
           fixmeWitnessHasLinkageThatNeedsToBePublic(witnessLinkage)) {
         Mangle::ASTMangler Mangler;
         addSymbol(
-            Mangler.mangleWitnessThunk(normalConformance, requirementDecl));
+            // SWIFT_ENABLE_TENSORFLOW
+            Mangler.mangleWitnessThunk(normalConformance,
+                                       SILDeclRef(requirementDecl)));
       }
     };
     normalConformance->forEachValueWitness(

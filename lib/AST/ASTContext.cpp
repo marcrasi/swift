@@ -384,6 +384,10 @@ FOR_KNOWN_FOUNDATION_TYPES(CACHE_FOUNDATION_DECL)
   /// A cache of tangent spaces per type.
   llvm::DenseMap<CanType, Optional<TangentSpace>> TangentSpaces;
 
+  /// For uniquifying AutoDiffAssociatedFunctionIdentifier allocations.
+  llvm::FoldingSet<AutoDiffAssociatedFunctionIdentifier>
+      AutoDiffAssociatedFunctionIdentifiers;
+
   /// List of Objective-C member conflicts we have found during type checking.
   std::vector<ObjCMethodConflict> ObjCMethodConflicts;
 
@@ -5269,4 +5273,29 @@ Optional<TangentSpace> ASTContext::getTangentSpace(CanType type,
   // Otherwise, the type does not have a tangent space. That is, it does not
   // support differentiation.
   return cache(None);
+}
+
+AutoDiffAssociatedFunctionIdentifier *
+AutoDiffAssociatedFunctionIdentifier::get(
+      AutoDiffAssociatedFunctionKind kind,
+      AutoDiffParameterIndices *parameterIndices,
+      ASTContext &C) {
+  auto &foldingSet = C.getImpl().AutoDiffAssociatedFunctionIdentifiers;
+
+  llvm::FoldingSetNodeID id;
+  id.AddInteger(kind);
+  id.Add(*parameterIndices);
+
+  void *insertPos;
+  auto *existing = foldingSet.FindNodeOrInsertPos(id, insertPos);
+  if (existing)
+    return existing;
+
+  auto *newAutoDiffAssociatedFunctionIdentifier =
+      C.Allocate<AutoDiffAssociatedFunctionIdentifier>();
+  newAutoDiffAssociatedFunctionIdentifier->kind = kind;
+  newAutoDiffAssociatedFunctionIdentifier->parameterIndices = parameterIndices;
+  foldingSet.InsertNode(newAutoDiffAssociatedFunctionIdentifier, insertPos);
+
+  return newAutoDiffAssociatedFunctionIdentifier;
 }

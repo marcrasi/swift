@@ -1769,20 +1769,33 @@ CanAnyFunctionType TypeConverter::makeConstantInterfaceType(SILDeclRef c) {
   auto *vd = c.loc.dyn_cast<ValueDecl *>();
 
   switch (c.kind) {
+  // SWIFT_ENABLE_TENSORFLOW
+  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
   case SILDeclRef::Kind::Func: {
+    CanAnyFunctionType underlyingType;
     if (auto *ACE = c.loc.dyn_cast<AbstractClosureExpr *>()) {
       // FIXME: Closures could have an interface type computed by Sema.
       auto funcTy = cast<AnyFunctionType>(ACE->getType()->getCanonicalType());
       funcTy = cast<AnyFunctionType>(
           funcTy->mapTypeOutOfContext()
               ->getCanonicalType());
-      return getFunctionInterfaceTypeWithCaptures(funcTy, ACE);
+      underlyingType = getFunctionInterfaceTypeWithCaptures(funcTy, ACE);
+    } else {
+      FuncDecl *func = cast<FuncDecl>(vd);
+      auto funcTy = cast<AnyFunctionType>(
+          func->getInterfaceType()->eraseDynamicSelfType()->getCanonicalType());
+      underlyingType = getFunctionInterfaceTypeWithCaptures(funcTy, func);
     }
 
-    FuncDecl *func = cast<FuncDecl>(vd);
-    auto funcTy = cast<AnyFunctionType>(
-        func->getInterfaceType()->eraseDynamicSelfType()->getCanonicalType());
-    return getFunctionInterfaceTypeWithCaptures(funcTy, func);
+    if (c.kind == SILDeclRef::Kind::AutoDiffAssociatedFunction) {
+      auto &identifier = *c.autoDiffAssociatedFunctionIdentifier;
+      auto *assocFnTy = underlyingType->getAutoDiffAssociatedFunctionType(
+          *identifier.getParameterIndices(), 1, identifier.getKind(),
+          LookUpConformanceInModule(M.getSwiftModule()));
+      return cast<AnyFunctionType>(assocFnTy->getCanonicalType());
+    }
+
+    return underlyingType;
   }
 
   case SILDeclRef::Kind::EnumElement:
@@ -1841,6 +1854,8 @@ TypeConverter::getConstantGenericEnvironment(SILDeclRef c) {
   
   /// Get the function generic params, including outer params.
   switch (c.kind) {
+  // SWIFT_ENABLE_TENSORFLOW
+  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
   case SILDeclRef::Kind::Func: {
     if (auto *ACE = c.getAbstractClosureExpr()) {
       auto captureInfo = getLoweredLocalCaptures(ACE);

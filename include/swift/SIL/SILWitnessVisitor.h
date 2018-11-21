@@ -138,8 +138,25 @@ public:
 
   void visitFuncDecl(FuncDecl *func) {
     assert(!isa<AccessorDecl>(func));
-    if (SILDeclRef::requiresNewWitnessTableEntry(func))
-      asDerived().addMethod(SILDeclRef(func, SILDeclRef::Kind::Func));
+    // SWIFT_ENABLE_TENSORFLOW
+    if (!SILDeclRef::requiresNewWitnessTableEntry(func))
+      return;
+
+    auto funcDeclRef = SILDeclRef(func, SILDeclRef::Kind::Func);
+    asDerived().addMethod(funcDeclRef);
+
+    if (auto *DA = func->getAttrs().getAttribute<DifferentiableAttr>()) {
+      asDerived().addMethod(funcDeclRef.asAutoDiffAssociatedFunction(
+          AutoDiffAssociatedFunctionIdentifier::get(
+              AutoDiffAssociatedFunctionKind::JVP,
+              DA->getCheckedParameterIndices(),
+              func->getASTContext())));
+      asDerived().addMethod(funcDeclRef.asAutoDiffAssociatedFunction(
+          AutoDiffAssociatedFunctionIdentifier::get(
+              AutoDiffAssociatedFunctionKind::VJP,
+              DA->getCheckedParameterIndices(),
+              func->getASTContext())));
+    }
   }
 
   void visitMissingMemberDecl(MissingMemberDecl *placeholder) {
