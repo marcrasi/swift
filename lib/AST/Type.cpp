@@ -4087,16 +4087,16 @@ Type TypeBase::openAnyExistentialType(ArchetypeType *&opened) {
 }
 
 // SWIFT_ENABLE_TENSORFLOW
-// Makes a function with the same generic signature as `copy`, but with
-// `params` parameters and `retTy` return type.
+// Makes a function with the same generic signature and extinfo as `copy`, but
+// with `params` parameters and `retTy` return type.
 static AnyFunctionType *
 makeFunctionType(AnyFunctionType *copy, ArrayRef<AnyFunctionType::Param> params,
                  Type retTy) {
   if (auto *genFunctionType = copy->getAs<GenericFunctionType>()) {
     return GenericFunctionType::get(genFunctionType->getGenericSignature(),
-                                    params, retTy);
+                                    params, retTy, copy->getExtInfo());
   }
-  return FunctionType::get(params, retTy);
+  return FunctionType::get(params, retTy, copy->getExtInfo());
 }
 
 AnyFunctionType *AnyFunctionType::getAutoDiffAdjointFunctionType(
@@ -4152,7 +4152,10 @@ AnyFunctionType *AnyFunctionType::getAutoDiffAdjointFunctionType(
 
 AnyFunctionType *AnyFunctionType::getAutoDiffAssociatedFunctionType(
     const AutoDiffParameterIndices &indices, unsigned differentiationOrder,
-    AutoDiffAssociatedFunctionKind kind, LookupConformanceFn lookupConformance) {
+    AutoDiffAssociatedFunctionKind kind, LookupConformanceFn lookupConformance,
+    bool selfUncurried) {
+  llvm::dbgs() << "getting associated type for " << Type((TypeBase*)this) << "\n";
+
   // JVP: (T...) -> ((R...),
   //                 (T.TangentVector...) -> (R.TangentVector...))
   // VJP: (T...) -> ((R...),
@@ -4188,12 +4191,12 @@ AnyFunctionType *AnyFunctionType::getAutoDiffAssociatedFunctionType(
   };
 
   SmallVector<Type, 8> wrtParamTypes;
-  indices.getSubsetParameterTypes(this, wrtParamTypes);
+  indices.getSubsetParameterTypes(this, wrtParamTypes, selfUncurried);
 
   // If this is a method, unwrap the function type so that we can see the
   // non-self parameters and the final result.
   AnyFunctionType *unwrapped = this;
-  if (indices.isMethod())
+  if (indices.isMethod() && !selfUncurried)
     unwrapped = unwrapped->getResult()->castTo<AnyFunctionType>();
   Type originalResult = unwrapped->getResult();
 
@@ -4261,9 +4264,11 @@ AnyFunctionType *AnyFunctionType::getAutoDiffAssociatedFunctionType(
 
   // If this is a method, wrap the associated function type in an additional
   // "(Self) ->" curry level.
-  if (indices.isMethod())
+  if (indices.isMethod() && !selfUncurried)
     associatedFunction =
         makeFunctionType(this, getParams(), associatedFunction);
+
+  llvm::dbgs() << "got associated type\n";
 
   return associatedFunction;
 }

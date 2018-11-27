@@ -338,11 +338,6 @@ namespace {
     }
     /// @}
 
-    // SWIFT_ENABLE_TENSORFLOW
-    bool parseAutoDiffParameterIndices(AutoDiffParameterIndices *&indices);
-    bool parseAutoDiffAssociatedFunctionKind(
-        AutoDiffAssociatedFunctionKind &kind);
-
     bool parseSILDottedPath(ValueDecl *&Decl,
                             SmallVectorImpl<ValueDecl *> &values);
     bool parseSILDottedPath(ValueDecl *&Decl) {
@@ -1574,47 +1569,6 @@ static Optional<AccessorKind> getAccessorKind(StringRef ident) {
            .Default(None);
 }
 
-// SWIFT_ENABLE_TENSORFLOW
-///  sil-decl-autodiff-kind ::= 'jvp'
-///  sil-decl-autodiff-kind ::= 'vjp'
-bool SILParser::parseAutoDiffAssociatedFunctionKind(
-    AutoDiffAssociatedFunctionKind &kind) {
-  Identifier Id;
-  if (parseSILIdentifier(Id, diag::expected_sil_constant))
-    return true;
-
-  if (Id.str() == "jvp") {
-    kind = AutoDiffAssociatedFunctionKind::JVP;
-    return false;
-  }
-
-  if (Id.str() == "vjp") {
-    kind = AutoDiffAssociatedFunctionKind::VJP;
-    return false;
-  }
-
-  P.diagnose(P.Tok.getLoc(), diag::malformed_autodiff_associated_function_kind);
-  return true;
-}
-
-///  autodiff-parameter-indices ::= [FM][SU]+
-/// 'F' means that we treat the function as a normal function.
-/// 'M' means that we treat the function as a method.
-/// 'S' means that the parameter bit is set.
-/// 'U' means that the parameter bit is unset.
-bool SILParser::parseAutoDiffParameterIndices(AutoDiffParameterIndices *&indices) {
-  Identifier Id;
-  if (parseSILIdentifier(Id, diag::expected_sil_constant))
-    return true;
-  indices = AutoDiffParameterIndices::create(SILMod.getASTContext(), Id.str());
-  if (!indices) {
-    P.diagnose(P.Tok.getLoc(),
-               diag::malformed_autodiff_associated_function_indices);
-    return true;
-  }
-  return false;
-}
-
 ///  sil-decl-ref ::= '#' sil-identifier ('.' sil-identifier)* sil-decl-subref?
 ///  sil-decl-subref ::= '!' sil-decl-subref-part ('.' sil-decl-uncurry-level)?
 ///                      ('.' sil-decl-lang)?
@@ -1627,11 +1581,6 @@ bool SILParser::parseAutoDiffParameterIndices(AutoDiffParameterIndices *&indices
 ///  sil-decl-subref-part ::= 'enumelt'
 ///  sil-decl-subref-part ::= 'destroyer'
 ///  sil-decl-subref-part ::= 'globalaccessor'
-// SWIFT_ENABLE_TENSORFLOW
-///  sil-decl-subref-part ::=
-///      'adfunc' '.' autodiff-associated-function-identifer
-///  autodiff-associated-function-identifier ::=
-///      autodiff-associated-function-kind '.' autodiff-parameter-indices
 ///  sil-decl-uncurry-level ::= [0-9]+
 ///  sil-decl-lang ::= 'foreign'
 bool SILParser::parseSILDeclRef(SILDeclRef &Result,
@@ -1661,9 +1610,6 @@ bool SILParser::parseSILDeclRef(SILDeclRef &Result,
   // ParseState is 2.
   unsigned ParseState = 0;
   Identifier Id;
-  // SWIFT_ENABLE_TENSORFLOW
-  AutoDiffAssociatedFunctionIdentifier *autoDiffAssociatedFunctionIdentifier
-      = nullptr;
   do {
     if (P.Tok.is(tok::identifier)) {
       auto IdLoc = P.Tok.getLoc();
@@ -1721,23 +1667,6 @@ bool SILParser::parseSILDeclRef(SILDeclRef &Result,
       } else if (!ParseState && Id.str() == "propertyinit") {
         Kind = SILDeclRef::Kind::StoredPropertyInitializer;
         ParseState = 1;
-      // SWIFT_ENABLE_TENSORFLOW
-      } else if (!ParseState && Id.str() == "adfunc") {
-        Kind = SILDeclRef::Kind::AutoDiffAssociatedFunction;
-        if (P.parseToken(tok::period, diag::expected_tok_in_sil_instr, "."))
-          return true;
-        AutoDiffAssociatedFunctionKind kind;
-        if (parseAutoDiffAssociatedFunctionKind(kind))
-          return true;
-        if (P.parseToken(tok::period, diag::expected_tok_in_sil_instr, "."))
-          return true;
-        AutoDiffParameterIndices *indices = nullptr;
-        if (parseAutoDiffParameterIndices(indices))
-          return true;
-        autoDiffAssociatedFunctionIdentifier =
-            AutoDiffAssociatedFunctionIdentifier::get(kind, indices,
-                                                      SILMod.getASTContext());
-        ParseState = 1;
       } else if (Id.str() == "foreign") {
         IsObjC = true;
         break;
@@ -1753,9 +1682,7 @@ bool SILParser::parseSILDeclRef(SILDeclRef &Result,
   } while (P.consumeIf(tok::period));
 
   // Construct SILDeclRef.
-  // SWIFT_ENABLE_TENSORFLOW
-  Result = SILDeclRef(VD, Kind, /*isCurried=*/false, IsObjC,
-                      autoDiffAssociatedFunctionIdentifier);
+  Result = SILDeclRef(VD, Kind, /*isCurried=*/false, IsObjC);
   if (uncurryLevel < Result.getParameterListCount() - 1)
     Result = Result.asCurried();
   return false;
@@ -2270,18 +2197,7 @@ bool SILParser::parseSILDeclRef(SILDeclRef &Member, bool FnTypeRequired) {
       auto lookupTy =
         decl->getInterfaceType()
             ->removeArgumentLabels(numArgumentLabels);
-      // SWIFT_ENABLE_TENSORFLOW
-      // For `AutoDiffAssociatedFunction`s, we need to look for a decl whose
-      // associated function type matches the SILDeclRef's type. So get the
-      // associated function type of the decl.
-      if (Member.kind == SILDeclRef::Kind::AutoDiffAssociatedFunction) {
-        auto &identifier = *Member.autoDiffAssociatedFunctionIdentifier;
-        lookupTy = lookupTy->castTo<AnyFunctionType>()
-            ->getAutoDiffAssociatedFunctionType(
-                *identifier.getParameterIndices(), 1, identifier.getKind(),
-                LookUpConformanceInModule(SILMod.getSwiftModule()));
-      }
-      if (declTy == lookupTy->getCanonicalType() || Member.kind == SILDeclRef::Kind::AutoDiffAssociatedFunction) {
+      if (declTy == lookupTy->getCanonicalType()) {
         TheDecl = decl;
         // Update SILDeclRef to point to the right Decl.
         Member.loc = decl;
@@ -6745,6 +6661,68 @@ static bool parseSILVTableEntry(
 
     witnessEntries.push_back(SILWitnessTable::AssociatedTypeWitness{
       assoc, Ty.getType()->getCanonicalType()
+    });
+    return false;
+  }
+
+  if (EntryKeyword.str() == "autodiff_associated_function") {
+    AutoDiffAssociatedFunctionKind AssocFuncKind;
+    Identifier AssocFuncKindId;
+    SourceLoc AssocFuncKindLoc;
+    if (witnessState.parseSILIdentifier(AssocFuncKindId, AssocFuncKindLoc,
+                                        diag::expected_sil_constant))
+      return true;
+    if (AssocFuncKindId.str() == "jvp")
+      AssocFuncKind = AutoDiffAssociatedFunctionKind::JVP;
+    else if (AssocFuncKindId.str() == "vjp")
+      AssocFuncKind = AutoDiffAssociatedFunctionKind::VJP;
+    else {
+      P.diagnose(AssocFuncKindLoc,
+                 diag::malformed_autodiff_associated_function_kind);
+      return true;
+    }
+
+    Identifier IndicesId;
+    SourceLoc IndicesLoc;
+    if (witnessState.parseSILIdentifier(IndicesId, IndicesLoc,
+                                        diag::expected_sil_constant))
+      return true;
+    AutoDiffParameterIndices *Indices = AutoDiffParameterIndices::create(
+        M.getASTContext(), IndicesId.str());
+    if (!Indices) {
+      P.diagnose(IndicesLoc,
+                 diag::malformed_autodiff_associated_function_indices);
+      return true;
+    }
+
+    AutoDiffAssociatedFunctionIdentifier *AssocFuncId =
+        AutoDiffAssociatedFunctionIdentifier::get(AssocFuncKind, Indices,
+                                                  M.getASTContext());
+
+    SILDeclRef Ref;
+    Identifier FuncName;
+    SourceLoc FuncLoc;
+    if (witnessState.parseSILDeclRef(Ref, true) ||
+        P.parseToken(tok::colon, diag::expected_sil_witness_colon))
+      return true;
+
+    SILFunction *Func = nullptr;
+    if (P.Tok.is(tok::kw_nil)) {
+      P.consumeToken();
+    } else {
+      if (P.parseToken(tok::at_sign, diag::expected_sil_function_name) ||
+          witnessState.parseSILIdentifier(FuncName, FuncLoc,
+                                          diag::expected_sil_value_name))
+        return true;
+
+      Func = M.lookUpFunction(FuncName.str());
+      if (!Func) {
+        P.diagnose(FuncLoc, diag::sil_witness_func_not_found, FuncName);
+        return true;
+      }
+    }
+    witnessEntries.push_back(SILWitnessTable::AutoDiffAssociatedFunctionWitness{
+      Ref, AssocFuncId, Func
     });
     return false;
   }

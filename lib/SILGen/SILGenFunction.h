@@ -642,7 +642,8 @@ public:
                            SubstitutionMap reqtSubs,
                            SILDeclRef witness,
                            SubstitutionMap witnessSubs,
-                           IsFreeFunctionWitness_t isFree);
+                           IsFreeFunctionWitness_t isFree,
+                           AutoDiffAssociatedFunctionIdentifier *id);
   
   /// Convert a block to a native function with a thunk.
   ManagedValue emitBlockToFunc(SILLocation loc,
@@ -1152,7 +1153,11 @@ public:
   }
   SILValue emitGlobalFunctionRef(SILLocation loc, SILDeclRef constant,
                                  SILConstantInfo constantInfo);
-  
+
+  SILValue emitGlobalAutoDiffAssociatedFunctionRef(
+      SILLocation loc, SILDeclRef constant,
+      AutoDiffAssociatedFunctionIdentifier *id);
+
   /// Returns a reference to a function value that dynamically dispatches
   /// the function in a runtime-modifiable way.
   ManagedValue emitDynamicMethodRef(SILLocation loc, SILDeclRef constant,

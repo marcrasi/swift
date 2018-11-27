@@ -302,7 +302,7 @@ public:
   emitProtocolWitness(ProtocolConformanceRef conformance, SILLinkage linkage,
                       IsSerialized_t isSerialized, SILDeclRef requirement,
                       SILDeclRef witnessRef, IsFreeFunctionWitness_t isFree,
-                      Witness witness);
+                      Witness witness, AutoDiffAssociatedFunctionIdentifier *id);
 
   /// Emit the default witness table for a resilient protocol.
   void emitDefaultWitnessTable(ProtocolDecl *protocol);

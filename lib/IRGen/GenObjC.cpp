@@ -528,8 +528,6 @@ namespace {
       case SILDeclRef::Kind::StoredPropertyInitializer:
       case SILDeclRef::Kind::EnumElement:
       case SILDeclRef::Kind::GlobalAccessor:
-      // SWIFT_ENABLE_TENSORFLOW
-      case SILDeclRef::Kind::AutoDiffAssociatedFunction:
         llvm_unreachable("Method does not have a selector");
 
       case SILDeclRef::Kind::Destroyer:

@@ -114,12 +114,13 @@ struct S : Proto {
 }
 
 // CHECK-LABEL: sil_witness_table {{.*}} S: Proto {{.*}} {
-// CHECK:  method #Proto.function1!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float
-// CHECK:  method #Proto.function1!adfunc.jvp.MSSU.1: <Self where Self : Proto> (Self) -> (Float, Float) -> (Float, (Float, Float) -> Float) : {{.*}}jvp009MSSU{{.*}}P9function1
-// CHECK:  method #Proto.function1!adfunc.vjp.MSSU.1: <Self where Self : Proto> (Self) -> (Float, Float) -> (Float, (Float) -> (Float, Float)) : {{.*}}vjp009MSSU{{.*}}P9function1
-// CHECK:  method #Proto.function2!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float
-// CHECK:  method #Proto.function2!adfunc.jvp.MSSS.1: <Self where Self : Proto> (Self) -> (Float, Float) -> (Float, (τ_0_0.TangentVector, Float, Float) -> Float) : {{.*}}jvp009MSSS{{.*}}P9function2
-// CHECK:  method #Proto.function2!adfunc.vjp.MSSS.1: <Self where Self : Proto> (Self) -> (Float, Float) -> (Float, (Float) -> (τ_0_0.CotangentVector, Float, Float)) : {{.*}}vjp009MSSS{{.*}}P9function2
-// CHECK:  method #Proto.function3!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float
-// CHECK:  method #Proto.function3!adfunc.jvp.MUSU.1: <Self where Self : Proto> (Self) -> (Float, Float) -> (Float, (Float) -> Float) : {{.*}}jvp009MUSU{{.*}}P9function3
-// CHECK:  method #Proto.function3!adfunc.vjp.MUSU.1: <Self where Self : Proto> (Self) -> (Float, Float) -> (Float, (Float) -> Float) : {{.*}}vjp009MUSU{{.*}}P9function3
+// CHECK: method #Proto.function1!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float {{.*}} // protocol witness for Proto.function1(_:_:) in conformance S
+// CHECK: autodiff_associated_function jvp MSSU #Proto.function1!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // jvpMSSU protocol witness for Proto.function1(_:_:) in conformance S
+// CHECK: autodiff_associated_function vjp MSSU #Proto.function1!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // vjpMSSU protocol witness for Proto.function1(_:_:) in conformance S
+// CHECK: method #Proto.function2!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // protocol witness for Proto.function2(_:_:) in conformance S
+// CHECK: autodiff_associated_function jvp MSSS #Proto.function2!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // jvpMSSS protocol witness for Proto.function2(_:_:) in conformance S
+// CHECK: autodiff_associated_function vjp MSSS #Proto.function2!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // vjpMSSS protocol witness for Proto.function2(_:_:) in conformance S
+// CHECK: method #Proto.function3!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // protocol witness for Proto.function3(_:_:) in conformance S
+// CHECK: autodiff_associated_function jvp MUSU #Proto.function3!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // jvpMUSU protocol witness for Proto.function3(_:_:) in conformance S
+// CHECK: autodiff_associated_function vjp MUSU #Proto.function3!1: <Self where Self : Proto> (Self) -> (Float, Float) -> Float : {{.*}} // vjpMUSU protocol witness for Proto.function3(_:_:) in conformance S
+// CHECK: }

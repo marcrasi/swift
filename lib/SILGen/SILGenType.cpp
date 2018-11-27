@@ -325,10 +325,10 @@ public:
     if (!reqAccessor) {
       if (auto witness = asDerived().getWitness(requirementRef.getDecl())) {
         return addMethodImplementation(requirementRef,
-                                       // SWIFT_ENABLE_TENSORFLOW
-                                       requirementRef.withDecl(
-                                           witness.getDecl()),
-                                       witness);
+                                       SILDeclRef(witness.getDecl(),
+                                                  requirementRef.kind),
+                                       witness,
+                                       nullptr);
       }
 
       return asDerived().addMissingMethod(requirementRef);
@@ -347,21 +347,38 @@ public:
       return asDerived().addMissingMethod(requirementRef);
 
     return addMethodImplementation(requirementRef,
-                                   // SWIFT_ENABLE_TENSORFLOW
-                                   requirementRef.withDecl(witnessAccessor),
-                                   witness);
+                                   SILDeclRef(witness.getDecl(),
+                                              requirementRef.kind),
+                                   witness,
+                                   nullptr);
+  }
+
+  void addAutoDiffAssociatedFunction(
+      SILDeclRef requirementOriginalMethod,
+      AutoDiffAssociatedFunctionIdentifier *requirementIdentifier) {
+    assert(!isa<AccessorDecl>(requirementOriginalMethod.getDecl()) &&
+           "@differentiable accessor requirements not supported");
+    auto witness = asDerived().getWitness(requirementOriginalMethod.getDecl());
+    assert(witness && "@differentiable default conformances not supported");
+    return addMethodImplementation(requirementOriginalMethod,
+                                   SILDeclRef(
+                                       witness.getDecl(),
+                                       requirementOriginalMethod.kind),
+                                   witness,
+                                   requirementIdentifier);
   }
 
 private:
   void addMethodImplementation(SILDeclRef requirementRef,
                                SILDeclRef witnessRef,
-                               Witness witness) {
+                               Witness witness,
+                               AutoDiffAssociatedFunctionIdentifier *id) {
     // Free function witnesses have an implicit uncurry layer imposed on them by
     // the inserted metatype argument.
     auto isFree =
       isFreeFunctionWitness(requirementRef.getDecl(), witnessRef.getDecl());
     asDerived().addMethodImplementation(requirementRef, witnessRef,
-                                        isFree, witness);
+                                        isFree, witness, id);
   }
 };
 
@@ -477,7 +494,8 @@ public:
   void addMethodImplementation(SILDeclRef requirementRef,
                                SILDeclRef witnessRef,
                                IsFreeFunctionWitness_t isFree,
-                               Witness witness) {
+                               Witness witness,
+                               AutoDiffAssociatedFunctionIdentifier *id) {
     // Emit the witness thunk and add it to the table.
     auto witnessLinkage = witnessRef.getLinkage(ForDefinition);
     auto witnessSerialized = Serialized;
@@ -495,9 +513,14 @@ public:
 
     SILFunction *witnessFn = SGM.emitProtocolWitness(
         ProtocolConformanceRef(Conformance), witnessLinkage, witnessSerialized,
-        requirementRef, witnessRef, isFree, witness);
-    Entries.push_back(
-                    SILWitnessTable::MethodWitness{requirementRef, witnessFn});
+        requirementRef, witnessRef, isFree, witness, id);
+    if (id) {
+      Entries.push_back(SILWitnessTable::AutoDiffAssociatedFunctionWitness{
+          requirementRef, id, witnessFn});
+    } else {
+      Entries.push_back(
+          SILWitnessTable::MethodWitness{requirementRef, witnessFn});
+    }
   }
 
   void addAssociatedType(AssociatedType requirement) {
@@ -597,11 +620,13 @@ SILGenModule::getWitnessTable(ProtocolConformance *conformance) {
 SILFunction *SILGenModule::emitProtocolWitness(
     ProtocolConformanceRef conformance, SILLinkage linkage,
     IsSerialized_t isSerialized, SILDeclRef requirement, SILDeclRef witnessRef,
-    IsFreeFunctionWitness_t isFree, Witness witness) {
-  auto requirementInfo = Types.getConstantInfo(requirement);
-
+    IsFreeFunctionWitness_t isFree, Witness witness, AutoDiffAssociatedFunctionIdentifier *id) {
   // Work out the lowered function type of the SIL witness thunk.
-  auto reqtOrigTy = cast<GenericFunctionType>(requirementInfo.LoweredType);
+  auto requirementLoweredType = Types.getConstantInfo(requirement).LoweredType;
+  if (id) {
+    requirementLoweredType = cast<AnyFunctionType>(requirementLoweredType->getAutoDiffAssociatedFunctionType(*id->getParameterIndices(), 1, id->getKind(), LookUpConformanceInModule(M.getSwiftModule()), true)->getCanonicalType());
+  }
+  auto reqtOrigTy = cast<GenericFunctionType>(requirementLoweredType);
 
   // Mapping from the requirement's generic signature to the witness
   // thunk's generic signature.
@@ -667,8 +692,14 @@ SILFunction *SILGenModule::emitProtocolWitness(
   Mangle::ASTMangler NewMangler;
   auto manglingConformance =
       conformance.isConcrete() ? conformance.getConcrete() : nullptr;
-  std::string nameBuffer =
-      NewMangler.mangleWitnessThunk(manglingConformance, requirement);
+  std::string nameBuffer;
+  if (id) {
+    nameBuffer = NewMangler.mangleAutoDiffAssociatedFunctionWitnessThunk(
+        manglingConformance, requirement.getDecl(), id);
+  } else {
+    nameBuffer = NewMangler.mangleWitnessThunk(
+        manglingConformance, requirement.getDecl());
+  }
 
   // If the thunked-to function is set to be always inlined, do the
   // same with the witness, on the theory that the user wants all
@@ -700,7 +731,7 @@ SILFunction *SILGenModule::emitProtocolWitness(
 
   SGF.emitProtocolWitness(AbstractionPattern(reqtOrigTy), reqtSubstTy,
                           requirement, reqtSubMap, witnessRef,
-                          witnessSubs, isFree);
+                          witnessSubs, isFree, id);
 
   return f;
 }
@@ -748,12 +779,18 @@ public:
   void addMethodImplementation(SILDeclRef requirementRef,
                                SILDeclRef witnessRef,
                                IsFreeFunctionWitness_t isFree,
-                               Witness witness) {
+                               Witness witness,
+                               AutoDiffAssociatedFunctionIdentifier *id) {
     SILFunction *witnessFn = SGM.emitProtocolWitness(
         ProtocolConformanceRef(Proto), SILLinkage::Private, IsNotSerialized,
-        requirementRef, witnessRef, isFree, witness);
-    auto entry = SILWitnessTable::MethodWitness{requirementRef, witnessFn};
-    DefaultWitnesses.push_back(entry);
+        requirementRef, witnessRef, isFree, witness, id);
+    if (id) {
+      auto entry = SILWitnessTable::AutoDiffAssociatedFunctionWitness{requirementRef, id, witnessFn};
+      DefaultWitnesses.push_back(entry);
+    } else {
+      auto entry = SILWitnessTable::MethodWitness{requirementRef, witnessFn};
+      DefaultWitnesses.push_back(entry);
+    }
   }
 
   void addAssociatedType(AssociatedType req) {

@@ -332,21 +332,6 @@ void SILDeclRef::print(raw_ostream &OS) const {
   case SILDeclRef::Kind::StoredPropertyInitializer:
     OS << "!propertyinit";
     break;
-  // SWIFT_ENABLE_TENSORFLOW
-  case SILDeclRef::Kind::AutoDiffAssociatedFunction: {
-    OS << "!adfunc" << ".";
-    switch (autoDiffAssociatedFunctionIdentifier->getKind()) {
-    case AutoDiffAssociatedFunctionKind::JVP:
-      OS << "jvp";
-      break;
-    case AutoDiffAssociatedFunctionKind::VJP:
-      OS << "vjp";
-      break;
-    }
-    OS << ".";
-    OS << autoDiffAssociatedFunctionIdentifier->getParameterIndices()
-       ->getString();
-  }
   }
 
   auto uncurryLevel = getParameterListCount() - 1;
@@ -2998,15 +2983,45 @@ void SILWitnessTable::Entry::print(llvm::raw_ostream &out, bool verbose,
         methodWitness.Requirement.getDecl()
             ->getDeclContext()
             ->getParentModule();
-    // SWIFT_ENABLE_TENSORFLOW
-    auto lookupConformance = LookUpConformanceInModule(methodWitness.Witness->getModule().getSwiftModule());
-    methodWitness.Requirement.getDeclInterfaceType(lookupConformance).print(
+    methodWitness.Requirement.getDecl()->getInterfaceType().print(
         out, QualifiedSILTypeOptions);
     out << " : ";
     if (methodWitness.Witness) {
       methodWitness.Witness->printName(out);
       out << "\t// "
          << demangleSymbol(methodWitness.Witness->getName());
+    } else {
+      out << "nil";
+    }
+    break;
+  }
+  case WitnessKind::AutoDiffAssociatedFunction: {
+    // autodiff_associated_function (jvp|vjp) <indices> #declref : @function
+    auto &witness = getAutoDiffAssociatedFunctionWitness();
+    out << "autodiff_associated_function ";
+    switch(witness.RequirementIdentifier->getKind()) {
+    case AutoDiffAssociatedFunctionKind::JVP:
+      out << "jvp ";
+      break;
+    case AutoDiffAssociatedFunctionKind::VJP:
+      out << "vjp ";
+      break;
+    }
+    out << witness.RequirementIdentifier->getParameterIndices()->getString();
+    out << " ";
+    witness.RequirementOriginalMethod.print(out);
+    out << ": ";
+    QualifiedSILTypeOptions.CurrentModule =
+        witness.RequirementOriginalMethod.getDecl()
+            ->getDeclContext()
+            ->getParentModule();
+    witness.RequirementOriginalMethod.getDecl()->getInterfaceType().print(
+        out, QualifiedSILTypeOptions);
+    out << " : ";
+    if (witness.Witness) {
+      witness.Witness->printName(out);
+      out << "\t// "
+         << demangleSymbol(witness.Witness->getName());
     } else {
       out << "nil";
     }

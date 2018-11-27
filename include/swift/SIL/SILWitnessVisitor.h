@@ -42,6 +42,7 @@ namespace swift {
 /// - addMethod()
 /// - addConstructor()
 /// - addAssociatedType()
+/// - addAutoDiffAssociatedFunction()
 
 template <class T> class SILWitnessVisitor : public ASTVisitor<T> {
   T &asDerived() { return *static_cast<T*>(this); }
@@ -146,16 +147,18 @@ public:
     asDerived().addMethod(funcDeclRef);
 
     if (auto *DA = func->getAttrs().getAttribute<DifferentiableAttr>()) {
-      asDerived().addMethod(funcDeclRef.asAutoDiffAssociatedFunction(
+      asDerived().addAutoDiffAssociatedFunction(
+          funcDeclRef,
           AutoDiffAssociatedFunctionIdentifier::get(
               AutoDiffAssociatedFunctionKind::JVP,
               DA->getCheckedParameterIndices(),
-              func->getASTContext())));
-      asDerived().addMethod(funcDeclRef.asAutoDiffAssociatedFunction(
+              func->getASTContext()));
+      asDerived().addAutoDiffAssociatedFunction(
+          funcDeclRef,
           AutoDiffAssociatedFunctionIdentifier::get(
               AutoDiffAssociatedFunctionKind::VJP,
               DA->getCheckedParameterIndices(),
-              func->getASTContext())));
+              func->getASTContext()));
     }
   }
 

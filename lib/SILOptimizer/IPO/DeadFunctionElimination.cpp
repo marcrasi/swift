@@ -166,6 +166,10 @@ protected:
           }
         } break;
 
+        case SILWitnessTable::AutoDiffAssociatedFunction:
+          ensureAlive(entry.getAutoDiffAssociatedFunctionWitness().Witness);
+          break;
+
         case SILWitnessTable::AssociatedTypeProtocol: {
           ProtocolConformanceRef CRef =
              entry.getAssociatedTypeProtocolWitness().Witness;

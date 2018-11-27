@@ -268,6 +268,34 @@ SILValue SILGenFunction::emitGlobalFunctionRef(SILLocation loc,
   return B.createFunctionRef(loc, f);
 }
 
+SILValue SILGenFunction::emitGlobalAutoDiffAssociatedFunctionRef(
+    SILLocation loc, SILDeclRef constant,
+    AutoDiffAssociatedFunctionIdentifier *id) {
+  auto *diffAttr =
+      constant.getDecl()->getAttrs().getAttribute<DifferentiableAttr>();
+
+  // If the original function decl has a @differentiable attribute that
+  // specifies the required associated function, then emit a ref to that.
+  if (diffAttr &&
+      *diffAttr->getCheckedParameterIndices() == *id->getParameterIndices()) {
+    FuncDecl *associatedFuncDecl;
+    switch (id->getKind()) {
+    case AutoDiffAssociatedFunctionKind::JVP:
+      associatedFuncDecl = diffAttr->getJVPFunction();
+      break;
+    case AutoDiffAssociatedFunctionKind::VJP:
+      associatedFuncDecl = diffAttr->getVJPFunction();
+      break;
+    }
+    if (associatedFuncDecl)
+      return emitGlobalFunctionRef(loc, SILDeclRef(associatedFuncDecl));
+  }
+
+  // Trigger differentiation of the original function, and emit a ref to the
+  // resulting associated function.
+  assert(0 && "TODO: trigger differentiation of conformances");
+}
+
 SILFunction *SILGenModule::
 getOrCreateReabstractionThunk(CanSILFunctionType thunkType,
                               CanSILFunctionType fromType,

@@ -3050,7 +3050,8 @@ public:
 
   AnyFunctionType *getAutoDiffAssociatedFunctionType(
       const AutoDiffParameterIndices &indices, unsigned differentiationOrder,
-      AutoDiffAssociatedFunctionKind kind, LookupConformanceFn lookupConformance);
+      AutoDiffAssociatedFunctionKind kind, LookupConformanceFn lookupConformance,
+      bool selfUncurried = false);
   AnyFunctionType *
   getAutoDiffAdjointFunctionType(const AutoDiffParameterIndices &indices,
                                  const TupleType *primalResultTy);
@@ -4088,7 +4089,8 @@ public:
   /// a function of this type.
   CanSILFunctionType getAutoDiffAssociatedFunctionType(
       const SmallBitVector &parameterIndices, unsigned differentiationOrder,
-      AutoDiffAssociatedFunctionKind kind, SILModule &module);
+      AutoDiffAssociatedFunctionKind kind, SILModule &module,
+      bool isMethod = false);
 
   /// If this is a @convention(witness_method) function with a protocol
   /// constrained self parameter, return the protocol constraint for

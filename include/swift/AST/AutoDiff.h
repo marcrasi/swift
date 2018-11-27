@@ -190,7 +190,8 @@ public:
   ///   ==> pushes {Self, C} to `paramTypes`.
   ///
   void getSubsetParameterTypes(AnyFunctionType *functionType,
-                               SmallVectorImpl<Type> &paramTypes) const;
+                               SmallVectorImpl<Type> &paramTypes,
+                               bool selfUncurried = false) const;
 
   /// Returns a bitvector for the SILFunction parameters corresponding to the
   /// parameters in this set. In particular, this explodes tuples and puts the
@@ -211,13 +212,18 @@ public:
   ///   ==> returns 1110
   ///   (because the lowered SIL type is (A, B, C, D) -> R)
   ///
-  llvm::SmallBitVector getLowered(AnyFunctionType *functionType) const;
+  llvm::SmallBitVector getLowered(AnyFunctionType *functionType,
+                                  bool selfUncurried = false) const;
 
   void Profile(llvm::FoldingSetNodeID &ID) const {
     ID.AddBoolean(isMethodFlag);
     ID.AddInteger(indices.size());
     for (unsigned setBit : indices.set_bits())
       ID.AddInteger(setBit);
+  }
+
+  bool operator==(const AutoDiffParameterIndices &other) const {
+    return isMethodFlag == other.isMethodFlag && indices == other.indices;
   }
 };
 

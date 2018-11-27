@@ -2653,6 +2653,7 @@ void ResultPlanner::execute(ArrayRef<SILValue> innerDirectResults,
   // A helper function to claim an inner direct result.
   auto claimNextInnerDirectResult = [&](SILResultInfo result) -> ManagedValue {
     auto resultValue = claimNext(innerDirectResults);
+    llvm::dbgs() << resultValue->getType() << " --- " << SGF.getSILType(result) << "\n";
     assert(resultValue->getType() == SGF.getSILType(result));
     auto &resultTL = SGF.getTypeLowering(result.getType());
     switch (result.getConvention()) {
@@ -3640,13 +3641,18 @@ getWitnessFunctionRef(SILGenFunction &SGF,
                       CanSILFunctionType witnessFTy,
                       WitnessDispatchKind witnessKind,
                       SmallVectorImpl<ManagedValue> &witnessParams,
-                      SILLocation loc) {
+                      SILLocation loc,
+                      AutoDiffAssociatedFunctionIdentifier *id) {
   switch (witnessKind) {
   case WitnessDispatchKind::Static:
+    if (id)
+      return SGF.emitGlobalAutoDiffAssociatedFunctionRef(loc, witness, id);
     return SGF.emitGlobalFunctionRef(loc, witness);
   case WitnessDispatchKind::Dynamic:
+    assert(!id);
     return SGF.emitDynamicMethodRef(loc, witness, witnessFTy).getValue();
   case WitnessDispatchKind::Class: {
+    assert(!id);
     SILValue selfPtr = witnessParams.back().getValue();
     return SGF.emitClassMethodRef(loc, selfPtr, witness, witnessFTy);
   }
@@ -3680,7 +3686,8 @@ void SILGenFunction::emitProtocolWitness(AbstractionPattern reqtOrigTy,
                                          SubstitutionMap reqtSubs,
                                          SILDeclRef witness,
                                          SubstitutionMap witnessSubs,
-                                         IsFreeFunctionWitness_t isFree) {
+                                         IsFreeFunctionWitness_t isFree,
+                                         AutoDiffAssociatedFunctionIdentifier *id) {
   // FIXME: Disable checks that the protocol witness carries debug info.
   // Should we carry debug info for witnesses?
   F.setBare(IsBare);
@@ -3701,8 +3708,11 @@ void SILGenFunction::emitProtocolWitness(AbstractionPattern reqtOrigTy,
   collectThunkParams(loc, origParams);
 
   // Get the type of the witness.
-  auto witnessInfo = getConstantInfo(witness);
-  CanAnyFunctionType witnessSubstTy = witnessInfo.LoweredType;
+  CanAnyFunctionType witnessSubstTy = getConstantInfo(witness).LoweredType;
+  if (id) {
+    witnessSubstTy = cast<AnyFunctionType>(witnessSubstTy->getAutoDiffAssociatedFunctionType(*id->getParameterIndices(), 1, id->getKind(), LookUpConformanceInModule(SGM.M.getSwiftModule()), true)->getCanonicalType());
+  }
+  llvm::dbgs() << "witnessSubstTy is " << witnessSubstTy << "\n";
   if (auto genericFnType = dyn_cast<GenericFunctionType>(witnessSubstTy)) {
     witnessSubstTy = cast<FunctionType>(genericFnType
                                           ->substGenericArgs(witnessSubs)
@@ -3732,12 +3742,21 @@ void SILGenFunction::emitProtocolWitness(AbstractionPattern reqtOrigTy,
   // Translate the argument values from the requirement abstraction level to
   // the substituted signature of the witness.
   auto origWitnessFTy = getWitnessFunctionType(SGM, witness, witnessKind);
+  if (id) {
+    origWitnessFTy = origWitnessFTy->getAutoDiffAssociatedFunctionType(
+        id->getParameterIndices()->getLowered(witnessSubstTy, true), 1, id->getKind(), SGM.M, true);
+    llvm::dbgs() << "set parameter indeces are: ";
+    for (unsigned i : id->getParameterIndices()->getLowered(witnessSubstTy, true).set_bits())
+      llvm::dbgs() << i << " ";
+    llvm::dbgs() << "\n";
+  }
+  llvm::dbgs() << "origWitnessFTy is " << origWitnessFTy << "\n";
   auto witnessFTy = origWitnessFTy;
   if (!witnessSubs.empty())
     witnessFTy = origWitnessFTy->substGenericArgs(SGM.M, witnessSubs);
 
   SmallVector<ManagedValue, 8> witnessParams;
-  AbstractionPattern witnessOrigTy(witnessInfo.LoweredType);
+  AbstractionPattern witnessOrigTy(witnessSubstTy);
   TranslateArguments(*this, loc,
                      origParams, witnessParams,
                      witnessFTy->getParameters())
@@ -3749,7 +3768,9 @@ void SILGenFunction::emitProtocolWitness(AbstractionPattern reqtOrigTy,
   SILValue witnessFnRef = getWitnessFunctionRef(*this, witness,
                                                 origWitnessFTy,
                                                 witnessKind,
-                                                witnessParams, loc);
+                                                witnessParams, loc, id);
+
+  llvm::dbgs() << "witnessFnRef is " << witnessFnRef << "\n";
 
   auto coroutineKind =
     witnessFnRef->getType().castTo<SILFunctionType>()->getCoroutineKind();

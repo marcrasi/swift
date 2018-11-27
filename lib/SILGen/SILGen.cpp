@@ -696,6 +696,8 @@ emitMarkFunctionEscapeForTopLevelCodeGlobals(SILLocation loc,
 }
 
 void SILGenModule::emitAbstractFuncDecl(AbstractFunctionDecl *AFD) {
+  llvm::dbgs() << "emitting AFD\n";
+
   // Emit any default argument generators.
   emitDefaultArgGenerators(AFD, AFD->getParameters());
 
@@ -730,6 +732,7 @@ void SILGenModule::emitAbstractFuncDecl(AbstractFunctionDecl *AFD) {
   // FIXME: Handle multiple @differentiable attributes.
   if (auto *diffAttr = cast_or_null<DifferentiableAttr>(
         AFD->getAttrs().getAttribute(DeclAttrKind::DAK_Differentiable))) {
+    llvm::dbgs() << "diffeerntiable stuff\n";
     switch (diffAttr->getMode()) {
     case AutoDiffMode::Forward:
       // TODO: Handle forward mode once [forward_differentiable] is implemented.
@@ -767,35 +770,12 @@ void SILGenModule::emitAbstractFuncDecl(AbstractFunctionDecl *AFD) {
           SILDifferentiableAttr::create(
             M, indices, primName, adjName,
             /*primitive*/ hasPrimitiveAdjoint, jvpName, vjpName));
-
-      // Register the JVP and VJP as "emitted" so that the witness table emitter
-      // finds them.
-      // TODO: We shoulde emit blank JVP and VJP functions in SILGen when
-      // they're not user-specified, so that the witness table can also have
-      // with non-user-specified functions.
-      // auto originalDeclRef = SILDeclRef(AFD);
-      // if (auto *jvpFnDecl = diffAttr->getJVPFunction()) {
-      //   auto declRef = originalDeclRef.asAutoDiffAssociatedFunction(
-      //       AutoDiffAssociatedFunctionIdentifier::get(
-      //           AutoDiffAssociatedFunctionKind::JVP,
-      //           diffAttr->getCheckedParameterIndices(),
-      //           AFD->getASTContext()));
-      //   emittedFunctions[declRef] = getFunction(SILDeclRef(jvpFnDecl),
-      //                                           ForDefinition);
-      // }
-      // if (auto *vjpFnDecl = diffAttr->getVJPFunction()) {
-      //   auto declRef = originalDeclRef.asAutoDiffAssociatedFunction(
-      //       AutoDiffAssociatedFunctionIdentifier::get(
-      //           AutoDiffAssociatedFunctionKind::VJP,
-      //           diffAttr->getCheckedParameterIndices(),
-      //           AFD->getASTContext()));
-      //   emittedFunctions[declRef] = getFunction(SILDeclRef(vjpFnDecl),
-      //                                           ForDefinition);
-      // }
       break;
     }
     }
   }
+
+  llvm::dbgs() << "done emitting AFD\n";
 }
 
 void SILGenModule::emitFunction(FuncDecl *fd) {
@@ -808,6 +788,7 @@ void SILGenModule::emitFunction(FuncDecl *fd) {
     PrettyStackTraceDecl stackTrace("emitting SIL for", fd);
 
     SILDeclRef constant(decl);
+    llvm::dbgs() << "the sildeclref is " << constant << "\n";
 
     bool ForCoverageMapping = doesASTRequireProfiling(M, fd);
 

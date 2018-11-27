@@ -211,7 +211,13 @@ CanSILFunctionType SILFunctionType::getWithDifferentiability(
 
 CanSILFunctionType SILFunctionType::getAutoDiffAssociatedFunctionType(
     const SmallBitVector &parameterIndices, unsigned differentiationOrder,
-    AutoDiffAssociatedFunctionKind kind, SILModule &module) {
+    AutoDiffAssociatedFunctionKind kind, SILModule &module,
+    bool isMethod) {
+  unsigned numParamsWithoutSelf = isMethod ? getNumParameters() - 1
+                                           : getNumParameters();
+  auto testParamIndex = [&](unsigned index) -> bool {
+    return index < parameterIndices.size()  && parameterIndices[index];
+  };
   // JVP: (T...) -> ((R...),
   //                 (T.TangentVector...) -> (R.TangentVector...))
   // VJP: (T...) -> ((R...),
@@ -254,11 +260,22 @@ CanSILFunctionType SILFunctionType::getAutoDiffAssociatedFunctionType(
   switch (kind) {
   case AutoDiffAssociatedFunctionKind::JVP: {
     SmallVector<SILParameterInfo, 8> tangentParams;
-    for (auto &param : getParameters())
+    if (isMethod && testParamIndex(numParamsWithoutSelf)) {
+      auto &param = getParameters()[numParamsWithoutSelf];
       tangentParams.push_back({
         getAssociatedType(param.getType(), "TangentVector"),
         param.getConvention()
       });
+    }
+    for (unsigned paramIndex : range(numParamsWithoutSelf)) {
+      if (testParamIndex(paramIndex)) {
+        auto &param = getParameters()[paramIndex];
+        tangentParams.push_back({
+          getAssociatedType(param.getType(), "TangentVector"),
+          param.getConvention()
+        });
+      }
+    }
     SmallVector<SILResultInfo, 8> tangentResults;
     for (auto &result : getResults())
       tangentResults.push_back({
@@ -284,10 +301,20 @@ CanSILFunctionType SILFunctionType::getAutoDiffAssociatedFunctionType(
           getFormalParameterInfo(
               getAssociatedType(result.getType(), "CotangentVector")));
     SmallVector<SILResultInfo, 8> cotangentResults;
-    for (auto &param : getParameters())
+    if (isMethod && testParamIndex(numParamsWithoutSelf)) {
+      auto &param = getParameters()[numParamsWithoutSelf];
       cotangentResults.push_back(
           getFormalResultInfo(
               getAssociatedType(param.getType(), "CotangentVector")));
+    }
+    for (unsigned paramIndex : range(numParamsWithoutSelf)) {
+      if (testParamIndex(paramIndex)) {
+        auto &param = getParameters()[paramIndex];
+        cotangentResults.push_back(
+            getFormalResultInfo(
+                getAssociatedType(param.getType(), "CotangentVector")));
+      }
+    }
     auto pullbackType = SILFunctionType::get(
         getGenericSignature(), ExtInfo(), SILCoroutineKind::None,
         ParameterConvention::Direct_Guaranteed, cotangentParams, {},
@@ -1501,8 +1528,6 @@ static CanSILFunctionType getNativeSILFunctionType(
     case SILDeclRef::Kind::StoredPropertyInitializer:
     case SILDeclRef::Kind::IVarInitializer:
     case SILDeclRef::Kind::IVarDestroyer:
-    // SWIFT_ENABLE_TENSORFLOW
-    case SILDeclRef::Kind::AutoDiffAssociatedFunction:
       return getSILFunctionType(M, origType, substInterfaceType, extInfo,
                                 getNormalArgumentConvention(M), ForeignInfo(),
                                 origConstant, constant, reqtSubs,
@@ -2026,8 +2051,6 @@ static SelectorFamily getSelectorFamily(SILDeclRef c) {
   case SILDeclRef::Kind::Destroyer:
   case SILDeclRef::Kind::Deallocator:
   case SILDeclRef::Kind::IVarDestroyer:
-  // SWIFT_ENABLE_TENSORFLOW
-  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
     return SelectorFamily::None;
 
   case SILDeclRef::Kind::EnumElement:
@@ -2279,8 +2302,6 @@ TypeConverter::getDeclRefRepresentation(SILDeclRef c) {
       return SILFunctionTypeRepresentation::Thin;
 
     case SILDeclRef::Kind::Func:
-    // SWIFT_ENABLE_TENSORFLOW
-    case SILDeclRef::Kind::AutoDiffAssociatedFunction:
       if (c.getDecl()->getDeclContext()->isTypeContext())
         return SILFunctionTypeRepresentation::Method;
       // SWIFT_ENABLE_TENSORFLOW
@@ -2817,8 +2838,6 @@ static AbstractFunctionDecl *getBridgedFunction(SILDeclRef declRef) {
   case SILDeclRef::Kind::StoredPropertyInitializer:
   case SILDeclRef::Kind::IVarInitializer:
   case SILDeclRef::Kind::IVarDestroyer:
-  // SWIFT_ENABLE_TENSORFLOW
-  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
     return nullptr;
   }
   llvm_unreachable("bad SILDeclRef kind");

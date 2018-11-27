@@ -102,8 +102,6 @@ DeclName SILGenModule::getMagicFunctionName(DeclContext *dc) {
 
 DeclName SILGenModule::getMagicFunctionName(SILDeclRef ref) {
   switch (ref.kind) {
-  // SWIFT_ENABLE_TENSORFLOW
-  case SILDeclRef::Kind::AutoDiffAssociatedFunction:
   case SILDeclRef::Kind::Func:
     if (auto closure = ref.getAbstractClosureExpr())
       return getMagicFunctionName(closure);

@@ -960,8 +960,8 @@ emitKeyPathComponent(IRGenModule &IGM,
         auto methodProto = cast<ProtocolDecl>(dc);
         auto &protoInfo = IGM.getProtocolInfo(methodProto,
                                               ProtocolInfoKind::Full);
-        // SWIFT_ENABLE_TENSORFLOW
-        auto index = protoInfo.getFunctionIndex(declRef);
+        auto index = protoInfo.getFunctionIndex(
+                             cast<AbstractFunctionDecl>(declRef.getDecl()));
         idValue = llvm::ConstantInt::get(IGM.SizeTy, -index.getValue());
         idResolved = true;
       }

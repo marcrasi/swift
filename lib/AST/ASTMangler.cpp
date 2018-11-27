@@ -29,7 +29,6 @@
 #include "swift/Basic/Defer.h"
 #include "swift/Demangling/ManglingUtils.h"
 #include "swift/Demangling/Demangler.h"
-#include "swift/SIL/SILDeclRef.h"  // SWIFT_ENABLE_TENSORFLOW
 #include "swift/Strings.h"
 #include "clang/Basic/CharInfo.h"
 #include "clang/AST/Attr.h"
@@ -235,26 +234,44 @@ std::string ASTMangler::mangleWitnessTable(const NormalProtocolConformance *C) {
 }
 
 std::string ASTMangler::mangleWitnessThunk(const ProtocolConformance *Conformance,
-                                           // SWIFT_ENABLE_TENSORFLOW
-                                           const SILDeclRef &member) {
+                                           const ValueDecl *Requirement) {
   beginMangling();
 
-  // SWIFT_ENABLE_TENSORFLOW
-  // TODO: Proper mangling for auto diff associated function witness thunks.
-  if (member.kind == SILDeclRef::Kind::AutoDiffAssociatedFunction) {
-    auto &identifier = *member.autoDiffAssociatedFunctionIdentifier;
-    switch (identifier.getKind()) {
-    case AutoDiffAssociatedFunctionKind::JVP:
-      appendIdentifier("jvp");
-      break;
-    case AutoDiffAssociatedFunctionKind::VJP:
-      appendIdentifier("vjp");
-      break;
-    }
-    appendIdentifier(identifier.getParameterIndices()->getString() + " ");
+  // Concrete witness thunks get a special mangling.
+  if (Conformance)
+    appendProtocolConformance(Conformance);
+
+  if (auto ctor = dyn_cast<ConstructorDecl>(Requirement)) {
+    appendConstructorEntity(ctor, /*isAllocating=*/true);
+  } else {
+    assert(isa<FuncDecl>(Requirement) && "expected function");
+    appendEntity(cast<FuncDecl>(Requirement));
   }
 
-  auto Requirement = member.getDecl();
+  if (Conformance)
+    appendOperator("TW");
+  return finalize();
+}
+
+std::string ASTMangler::mangleAutoDiffAssociatedFunctionWitnessThunk(
+    const ProtocolConformance *Conformance, const ValueDecl *Requirement,
+    const AutoDiffAssociatedFunctionIdentifier *id) {
+  assert(id);
+
+  beginMangling();
+
+  // TODO: Proper mangling for autodiff associated function witness thunks.
+  switch (id->getKind()) {
+  case AutoDiffAssociatedFunctionKind::JVP:
+    appendIdentifier("jvp");
+    break;
+  case AutoDiffAssociatedFunctionKind::VJP:
+    appendIdentifier("vjp");
+    break;
+  }
+  appendIdentifier(id->getParameterIndices()->getString() + " ");
+
+  // The rest of this function is copy-pasted from `mangleWitnessThunk`.
 
   // Concrete witness thunks get a special mangling.
   if (Conformance)
