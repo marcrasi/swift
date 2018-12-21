@@ -805,7 +805,7 @@ public:
   llvm::StructType *createNominalType(CanType type);
   llvm::StructType *createNominalType(ProtocolCompositionType *T);
   // SWIFT_ENABLE_TENSORFLOW
-  llvm::StructType *IRGenModule::getDifferentiableThickFunctionStorageType(
+  llvm::StructType *getDifferentiableThickFunctionStorageType(
       unsigned differentiationOrder);
   clang::CanQual<clang::Type> getClangType(CanType type);
   clang::CanQual<clang::Type> getClangType(SILType type);

@@ -1806,6 +1806,7 @@ void IRGenSILFunction::visitSILBasicBlock(SILBasicBlock *BB) {
   bool KeepCurrentLocation = false;
 
   for (auto &I : *BB) {
+    llvm::dbgs() << "processing " << I << "\n";
     if (IGM.DebugInfo) {
       // Set the debug info location for I, if applicable.
       auto DS = I.getDebugScope();
@@ -5666,13 +5667,16 @@ void IRGenSILFunction::visitConvertFunctionInst(swift::ConvertFunctionInst *i) {
 
 void IRGenSILFunction::visitConvertEscapeToNoEscapeInst(
     swift::ConvertEscapeToNoEscapeInst *i) {
-  // This instruction makes the context trivial.
+  // This instruction makes the context(s) trivial.
   Explosion in = getLoweredExplosion(i->getOperand());
-  llvm::Value *fn = in.claimNext();
-  llvm::Value *ctx = in.claimNext();
   Explosion out;
-  out.add(fn);
-  out.add(Builder.CreateBitCast(ctx, IGM.OpaquePtrTy));
+  for (unsigned index : range(in.size() / 2)) {
+    (void)index;
+    llvm::Value *fn = in.claimNext();
+    llvm::Value *ctx = in.claimNext();
+    out.add(fn);
+    out.add(Builder.CreateBitCast(ctx, IGM.OpaquePtrTy));
+  }
   setLoweredExplosion(i, out);
 }
 

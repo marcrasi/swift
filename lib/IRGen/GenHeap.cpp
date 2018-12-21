@@ -394,6 +394,7 @@ void irgen::emitDeallocatePartialClassInstance(IRGenFunction &IGF,
 /// TODO: give this some reasonable name and possibly linkage.
 static llvm::Function *createDtorFn(IRGenModule &IGM,
                                     const HeapLayout &layout) {
+  llvm::dbgs() << "createDtorFn\n";
   llvm::Function *fn =
     llvm::Function::Create(IGM.DeallocatingDtorTy,
                            llvm::Function::PrivateLinkage,
@@ -420,10 +421,13 @@ static llvm::Function *createDtorFn(IRGenModule &IGM,
   // Figure out the non-fixed offsets.
   HeapNonFixedOffsets offsets(IGF, layout);
 
+  llvm::dbgs() << "about to destroy fields\n";
   // Destroy the fields.
   for (unsigned i : indices(layout.getElements())) {
     auto &field = layout.getElement(i);
+    //llvm::dbgs() << "destroy " << field << "\n";
     auto fieldTy = layout.getElementTypes()[i];
+    llvm::dbgs() << "destroy " << fieldTy << "\n";
     if (field.isPOD())
       continue;
 
@@ -436,6 +440,7 @@ static llvm::Function *createDtorFn(IRGenModule &IGM,
                            offsets.getAlignMask());
   IGF.Builder.CreateRetVoid();
 
+  llvm::dbgs() << "done\n";
   return fn;
 }
 
@@ -466,10 +471,12 @@ static llvm::Constant *buildPrivateMetadata(IRGenModule &IGM,
                                             llvm::Constant *dtorFn,
                                             llvm::Constant *captureDescriptor,
                                             MetadataKind kind) {
+  llvm::dbgs() << "buildPrivateMetadata\n";
   // Build the fields of the private metadata.
   ConstantInitBuilder builder(IGM);
   auto fields = builder.beginStruct(IGM.FullBoxMetadataStructTy);
 
+  llvm::dbgs() << "began struct\n";
   fields.add(dtorFn);
   fields.addNullPointer(IGM.WitnessTablePtrTy);
   {
@@ -478,6 +485,7 @@ static llvm::Constant *buildPrivateMetadata(IRGenModule &IGM,
     kindStruct.finishAndAddTo(fields);
   }
 
+  llvm::dbgs() << "stuff 1\n";
   // Figure out the offset to the first element, which is necessary to be able
   // to polymorphically project as a generic box.
   auto elements = layout.getElements();
@@ -491,6 +499,7 @@ static llvm::Constant *buildPrivateMetadata(IRGenModule &IGM,
 
   fields.add(captureDescriptor);
 
+  llvm::dbgs() << "stuff 2\n";
   llvm::GlobalVariable *var =
     fields.finishAndCreateGlobal("metadata",
                                  IGM.getPointerAlignment(),
@@ -501,6 +510,7 @@ static llvm::Constant *buildPrivateMetadata(IRGenModule &IGM,
     llvm::ConstantInt::get(IGM.Int32Ty, 0),
     llvm::ConstantInt::get(IGM.Int32Ty, 2)
   };
+  llvm::dbgs() << "stuff 3\n";
   return llvm::ConstantExpr::getInBoundsGetElementPtr(
       /*Ty=*/nullptr, var, indices);
 }

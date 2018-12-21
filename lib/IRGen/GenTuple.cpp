@@ -64,7 +64,23 @@ namespace {
       return tup->getElement(Index);
     }
     
-    SILType getType(IRGenModule&, SILType t) const {
+    SILType getType(IRGenModule& IGM, SILType t) const {
+      if (auto fnTy = t.getAs<SILFunctionType>()) {
+        auto extInfo = fnTy->getExtInfo();
+        auto nondiffExtInfo = extInfo.withDifferentiable(false);
+        auto origTy = fnTy->getWithExtInfo(nondiffExtInfo);
+        if (Index == 0)
+          return SILType::getPrimitiveObjectType(origTy);
+        unsigned differentiationOrder = (Index - 1) / 2 + 1;
+        auto kind = (Index - 1) % 2 == 0 ? AutoDiffAssociatedFunctionKind::JVP
+                                         : AutoDiffAssociatedFunctionKind::VJP;
+        auto assocTy = origTy->getAutoDiffAssociatedFunctionType(
+            SmallBitVector(origTy->getNumParameters(), true), /*resultIndex*/ 0,
+            differentiationOrder, kind, IGM.getSILModule(),
+            LookUpConformanceInModule(IGM.getSwiftModule()));
+        return SILType::getPrimitiveObjectType(assocTy);
+      }
+
       return t.getTupleElementType(Index);
     }
   };
