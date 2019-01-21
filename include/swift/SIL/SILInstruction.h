@@ -7576,10 +7576,6 @@ public:
 
   SILValue getAssociatedFunction(unsigned differentiationOrder,
                                  AutoDiffAssociatedFunctionKind kind) const;
-
-  static bool classof(const SILNode *N) {
-    return N->getKind() == SILNodeKind::AutoDiffFunctionInst;
-  }
 };
 
 /// `autodiff_function_extract` - given an `@autodiff` function representing a
@@ -7648,10 +7644,6 @@ public:
 
   MutableArrayRef<Operand> getAllOperands() {
     return operands.asArray();
-  }
-
-  static bool classof(const SILNode *N) {
-    return N->getKind() == SILNodeKind::AutoDiffFunctionExtractInst;
   }
 };
 
