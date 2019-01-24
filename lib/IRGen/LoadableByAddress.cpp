@@ -2642,9 +2642,13 @@ void LoadableByAddress::recreateConvInstrs() {
     // SWIFT_ENABLE_TENSORFLOW
     case SILInstructionKind::AutoDiffFunctionInst: {
       auto instr = cast<AutoDiffFunctionInst>(convInstr);
+      SmallVector<SILValue, 2> associatedFunctions;
+      for (auto &assocFn : instr->getAssociatedFunctions())
+        associatedFunctions.push_back(assocFn.get());
       newInstr = convBuilder.createAutoDiffFunction(
           instr->getLoc(), instr->getParameterIndices(),
-          instr->getDifferentiationOrder(), instr->getOriginalFunction());
+          instr->getDifferentiationOrder(), instr->getOriginalFunction(),
+          associatedFunctions);
       break;
     }
     case SILInstructionKind::AutoDiffFunctionExtractInst: {
@@ -2810,6 +2814,10 @@ void LoadableByAddress::run() {
           if (modApplies.count(PAI) == 0) {
             modApplies.insert(PAI);
           }
+        } else if (auto *ADFI = dyn_cast<AutoDiffFunctionInst>(&I)) {
+          conversionInstrs.insert(ADFI);
+        } else if (auto *ADFEI = dyn_cast<AutoDiffFunctionExtractInst>(&I)) {
+          conversionInstrs.insert(ADFEI);
         }
       }
     }
