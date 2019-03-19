@@ -1,5 +1,6 @@
 // SWIFT_ENABLE_TENSORFLOW
 // RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=COMPLETE1 | %FileCheck --check-prefix=COMPLETE1 %s
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=COMPLETE2 | %FileCheck --check-prefix=COMPLETE2 %s
 
 protocol DifferentiableRequirements {
   @differentiable
