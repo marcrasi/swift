@@ -15,6 +15,7 @@
 #include "SwiftLangSupport.h"
 #include "SourceKit/Core/Context.h"
 #include "SourceKit/Core/NotificationCenter.h"
+#include "SourceKit/Support/FileSystemProvider.h"
 #include "SourceKit/Support/ImmutableTextBuffer.h"
 #include "SourceKit/Support/Logging.h"
 #include "SourceKit/Support/Tracing.h"
@@ -600,6 +601,7 @@ class SwiftDocumentSemanticInfo :
   std::weak_ptr<SwiftASTManager> ASTMgr;
   std::shared_ptr<NotificationCenter> NotificationCtr;
   ThreadSafeRefCntPtr<SwiftInvocation> InvokRef;
+  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem;
   std::string CompilerArgsError;
 
   uint64_t ASTGeneration = 0;
@@ -612,20 +614,30 @@ class SwiftDocumentSemanticInfo :
   mutable llvm::sys::Mutex Mtx;
 
 public:
-  SwiftDocumentSemanticInfo(StringRef Filename,
-                            std::weak_ptr<SwiftASTManager> ASTMgr,
-                            std::shared_ptr<NotificationCenter> NotificationCtr)
-      : Filename(Filename), ASTMgr(ASTMgr), NotificationCtr(NotificationCtr) {}
+  SwiftDocumentSemanticInfo(
+      StringRef Filename, std::weak_ptr<SwiftASTManager> ASTMgr,
+      std::shared_ptr<NotificationCenter> NotificationCtr,
+      llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem)
+      : Filename(Filename), ASTMgr(ASTMgr), NotificationCtr(NotificationCtr),
+        fileSystem(fileSystem) {}
 
   SwiftInvocationRef getInvocation() const {
     return InvokRef;
   }
 
+  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> getFileSystem() const {
+    return fileSystem;
+  }
+
   uint64_t getASTGeneration() const;
 
-  void setCompilerArgs(ArrayRef<const char *> Args) {
+  void
+  setCompilerArgs(ArrayRef<const char *> Args,
+                  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FileSystem) {
+    assert(FileSystem);
     if (auto ASTMgr = this->ASTMgr.lock()) {
-      InvokRef = ASTMgr->getInvocation(Args, Filename, CompilerArgsError);
+      InvokRef =
+          ASTMgr->getInvocation(Args, Filename, FileSystem, CompilerArgsError);
     }
   }
 
@@ -1034,7 +1046,8 @@ void SwiftDocumentSemanticInfo::processLatestSnapshotAsync(
   // SwiftDocumentSemanticInfo pointer so use that for the token.
   const void *OncePerASTToken = SemaInfoRef.get();
   if (auto ASTMgr = this->ASTMgr.lock()) {
-    ASTMgr->processASTAsync(Invok, std::move(Consumer), OncePerASTToken);
+    ASTMgr->processASTAsync(Invok, std::move(Consumer), OncePerASTToken,
+                            fileSystem);
   }
 }
 
@@ -1072,8 +1085,11 @@ struct SwiftEditorDocument::Implementation {
       : ASTMgr(LangSupport.getASTManager()),
         NotificationCtr(LangSupport.getNotificationCenter()),
         FilePath(FilePath), FormatOptions(options) {
-    SemanticInfo =
-        new SwiftDocumentSemanticInfo(FilePath, ASTMgr, NotificationCtr);
+    // This instance of semantic info is used if a document is opened with
+    // `key.syntactic_only: 1`, but subsequently a semantic request such as
+    // cursor_info is made.
+    SemanticInfo = new SwiftDocumentSemanticInfo(
+        FilePath, ASTMgr, NotificationCtr, llvm::vfs::getRealFileSystem());
   }
 };
 
@@ -1683,7 +1699,9 @@ SwiftEditorDocument::~SwiftEditorDocument()
 
 ImmutableTextSnapshotRef SwiftEditorDocument::initializeText(
     llvm::MemoryBuffer *Buf, ArrayRef<const char *> Args,
-    bool ProvideSemanticInfo) {
+    bool ProvideSemanticInfo,
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FileSystem) {
+  assert(FileSystem);
 
   llvm::sys::ScopedLock L(Impl.AccessMtx);
 
@@ -1698,9 +1716,9 @@ ImmutableTextSnapshotRef SwiftEditorDocument::initializeText(
   // Try to create a compiler invocation object if needing semantic info
   // or it's syntactic-only but with passed-in compiler arguments.
   if (ProvideSemanticInfo || !Args.empty()) {
-    Impl.SemanticInfo = new SwiftDocumentSemanticInfo(Impl.FilePath, Impl.ASTMgr,
-                                                      Impl.NotificationCtr);
-    Impl.SemanticInfo->setCompilerArgs(Args);
+    Impl.SemanticInfo = new SwiftDocumentSemanticInfo(
+        Impl.FilePath, Impl.ASTMgr, Impl.NotificationCtr, FileSystem);
+    Impl.SemanticInfo->setCompilerArgs(Args, FileSystem);
   }
   return Impl.EditableBuffer->getSnapshot();
 }
@@ -1928,6 +1946,13 @@ bool SwiftEditorDocument::hasUpToDateAST() const {
   return Impl.SyntaxInfo->hasUpToDateAST();
 }
 
+llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>
+SwiftEditorDocument::getFileSystem() const {
+  llvm::sys::ScopedLock L(Impl.AccessMtx);
+  return Impl.SemanticInfo ? Impl.SemanticInfo->getFileSystem()
+                           : llvm::vfs::getRealFileSystem();
+}
+
 void SwiftEditorDocument::formatText(unsigned Line, unsigned Length,
                                      EditorConsumer &Consumer) {
   auto SyntaxInfo = Impl.getSyntaxInfo();
@@ -2097,15 +2122,23 @@ void SwiftEditorDocument::reportDocumentStructure(SourceFile &SrcFile,
 // EditorOpen
 //===----------------------------------------------------------------------===//
 
-void SwiftLangSupport::editorOpen(StringRef Name, llvm::MemoryBuffer *Buf,
-                                  EditorConsumer &Consumer,
-                                  ArrayRef<const char *> Args) {
+void SwiftLangSupport::editorOpen(
+    StringRef Name, llvm::MemoryBuffer *Buf, EditorConsumer &Consumer,
+    ArrayRef<const char *> Args, Optional<VFSOptions> vfsOptions) {
+
+  std::string error;
+  // Do not provide primaryFile so that opening an existing document will
+  // reinitialize the filesystem instead of keeping the old one.
+  auto fileSystem = getFileSystem(vfsOptions, /*primaryFile=*/None, error);
+  if (!fileSystem)
+    return Consumer.handleRequestError(error.c_str());
 
   ImmutableTextSnapshotRef Snapshot = nullptr;
   auto EditorDoc = EditorDocuments->getByUnresolvedName(Name);
   if (!EditorDoc) {
     EditorDoc = new SwiftEditorDocument(Name, *this);
-    Snapshot = EditorDoc->initializeText(Buf, Args, Consumer.needsSemanticInfo());
+    Snapshot = EditorDoc->initializeText(
+        Buf, Args, Consumer.needsSemanticInfo(), fileSystem);
     EditorDoc->parse(Snapshot, *this, Consumer.syntaxTreeEnabled());
     if (EditorDocuments->getOrUpdate(Name, *this, EditorDoc)) {
       // Document already exists, re-initialize it. This should only happen
@@ -2118,7 +2151,8 @@ void SwiftLangSupport::editorOpen(StringRef Name, llvm::MemoryBuffer *Buf,
   }
 
   if (!Snapshot) {
-    Snapshot = EditorDoc->initializeText(Buf, Args, Consumer.needsSemanticInfo());
+    Snapshot = EditorDoc->initializeText(
+        Buf, Args, Consumer.needsSemanticInfo(), fileSystem);
     EditorDoc->parse(Snapshot, *this, Consumer.syntaxTreeEnabled());
   }
 
@@ -2136,7 +2170,6 @@ void SwiftLangSupport::editorOpen(StringRef Name, llvm::MemoryBuffer *Buf,
                               ReusedNodeIds);
   }
 }
-
 
 //===----------------------------------------------------------------------===//
 // EditorClose
