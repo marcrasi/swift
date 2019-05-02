@@ -614,9 +614,10 @@ public:
   virtual void
   codeCompleteSetCustom(ArrayRef<CustomCompletionInfo> completions) = 0;
 
-  virtual void editorOpen(StringRef Name, llvm::MemoryBuffer *Buf,
-                          EditorConsumer &Consumer,
-                          ArrayRef<const char *> Args) = 0;
+  virtual void
+  editorOpen(StringRef Name, llvm::MemoryBuffer *Buf, EditorConsumer &Consumer,
+             ArrayRef<const char *> Args,
+             llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FileSystem) = 0;
 
   virtual void editorOpenInterface(EditorConsumer &Consumer,
                                    StringRef Name,

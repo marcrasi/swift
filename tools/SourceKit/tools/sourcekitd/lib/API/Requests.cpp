@@ -184,7 +184,8 @@ conformingMethodList(llvm::MemoryBuffer *InputBuf, int64_t Offset,
 
 static sourcekitd_response_t
 editorOpen(StringRef Name, llvm::MemoryBuffer *Buf,
-           SKEditorConsumerOptions Opts, ArrayRef<const char *> Args);
+           SKEditorConsumerOptions Opts, ArrayRef<const char *> Args,
+           llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FileSystem);
 
 static sourcekitd_response_t
 editorOpenInterface(StringRef Name, StringRef ModuleName,
@@ -492,8 +493,8 @@ void handleRequestImpl(
     Optional<StringRef> Name = Req.getString(KeyName);
     if (!Name.hasValue())
       return Rec(createErrorRequestInvalid("missing 'key.name'"));
-    std::unique_ptr<llvm::MemoryBuffer>
-    InputBuf = getInputBufForRequest(SourceFile, SourceText, ErrBuf);
+    std::unique_ptr<llvm::MemoryBuffer> InputBuf =
+        getInputBufForRequest(SourceFile, SourceText, ErrBuf, FileSystem.get());
     if (!InputBuf)
       return Rec(createErrorRequestFailed(ErrBuf.c_str()));
     int64_t EnableSyntaxMap = true;
@@ -518,7 +519,7 @@ void handleRequestImpl(
       return Rec(createErrorRequestFailed("Invalid serialization format"));
     Opts.SyntaxSerializationFormat = SyntaxSerializationFormat.getValue();
     Opts.SyntacticOnly = SyntacticOnly;
-    return Rec(editorOpen(*Name, InputBuf.get(), Opts, Args));
+    return Rec(editorOpen(*Name, InputBuf.get(), Opts, Args, FileSystem));
   }
   if (ReqUID == RequestEditorClose) {
     Optional<StringRef> Name = Req.getString(KeyName);
@@ -2320,10 +2321,11 @@ public:
 
 static sourcekitd_response_t
 editorOpen(StringRef Name, llvm::MemoryBuffer *Buf,
-           SKEditorConsumerOptions Opts, ArrayRef<const char *> Args) {
+           SKEditorConsumerOptions Opts, ArrayRef<const char *> Args,
+           llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FileSystem) {
   SKEditorConsumer EditC(Opts);
   LangSupport &Lang = getGlobalContext().getSwiftLangSupport();
-  Lang.editorOpen(Name, Buf, EditC, Args);
+  Lang.editorOpen(Name, Buf, EditC, Args, FileSystem);
   return EditC.createResponse();
 }
 
