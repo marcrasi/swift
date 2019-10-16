@@ -735,6 +735,15 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
   // Create a new explosion for potentially reabstracted parameters.
   Explosion args;
 
+  // Witness method calls expect self, followed by the self type followed by,
+  // the witness table at the end of the parameter list. But polymorphic
+  // arguments come before this.
+  bool isWitnessMethodCallee = origType->getRepresentation() ==
+      SILFunctionTypeRepresentation::WitnessMethod;
+  Explosion witnessMethodSelfValue;
+
+
+
   Address resultValueAddr;
 
   {
@@ -754,6 +763,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
       auto resultAddr = origParams.claimNext();
       resultAddr = subIGF.Builder.CreateBitCast(
           resultAddr, IGM.getStoragePointerType(origConv.getSILResultType()));
+      llvm::dbgs() << "adding indirect return value\n";
       args.add(resultAddr);
     } else if (origNativeSchema.requiresIndirect()) {
       assert(!nativeResultSchema.requiresIndirect());
@@ -763,6 +773,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
       auto resultAddr = subIGF.Builder.CreateBitCast(
           resultValueAddr,
           IGM.getStoragePointerType(origConv.getSILResultType()));
+      llvm::dbgs() << "adding indirect return value 2\n";
       args.add(resultAddr.getAddress());
     }
 
@@ -770,11 +781,16 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
       auto addr = origParams.claimNext();
       addr = subIGF.Builder.CreateBitCast(
           addr, IGM.getStoragePointerType(resultType));
+      llvm::dbgs() << "adding indirect return value 3\n";
       args.add(addr);
     }
     
     // Reemit the parameters as unsubstituted.
     for (unsigned i = 0; i < outType->getParameters().size(); ++i) {
+      bool isWitnessMethodCalleeSelf = (isWitnessMethodCallee &&
+          i + 1 == origType->getParameters().size());
+      auto* argsToActuallyMutate = isWitnessMethodCalleeSelf ? &witnessMethodSelfValue : &args;
+
       auto origParamInfo = origType->getParameters()[i];
       auto &ti = IGM.getTypeInfoForLowered(origParamInfo.getType());
       auto schema = ti.getSchema();
@@ -788,7 +804,8 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
         if (addr->getType() != ti.getStorageType()->getPointerTo())
           addr = subIGF.Builder.CreateBitCast(addr,
                                            ti.getStorageType()->getPointerTo());
-        args.add(addr);
+        llvm::dbgs() << "adding indirect param " << i << " " << args.size() << "\n";
+        argsToActuallyMutate->add(addr);
         continue;
       }
 
@@ -796,8 +813,9 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
       // Indirect parameters need no mapping through the native calling
       // convention.
       if (isIndirectParam) {
+        llvm::dbgs() << "emitApplyArgument " << i << " " << args.size() << "\n";
         emitApplyArgument(subIGF, origParamInfo, outTypeParamInfo, origParams,
-                          args);
+                          *argsToActuallyMutate);
         continue;
       }
 
@@ -824,7 +842,8 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
       Explosion nativeApplyArg = nativeSchemaOrigParam.mapIntoNative(
           subIGF.IGM, subIGF, nonNativeApplyArg, origParamSILType, false);
       assert(nonNativeApplyArg.empty());
-      nativeApplyArg.transferInto(args, nativeApplyArg.size());
+      llvm::dbgs() << "transferInto " << i << " " << args.size() << "\n";
+      nativeApplyArg.transferInto(*argsToActuallyMutate, nativeApplyArg.size());
     }
   }
 
@@ -934,13 +953,6 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
   auto haveContextArgument =
       calleeHasContext || hasSelfContextParameter(origType);
 
-  // Witness method calls expect self, followed by the self type followed by,
-  // the witness table at the end of the parameter list. But polymorphic
-  // arguments come before this.
-  bool isWitnessMethodCallee = origType->getRepresentation() ==
-      SILFunctionTypeRepresentation::WitnessMethod;
-  Explosion witnessMethodSelfValue;
-
   // If there's a data pointer required, but it's a swift-retainable
   // value being passed as the context, just forward it down.
   if (!layout) {
@@ -1012,6 +1024,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
     } else {
       argValue = subIGF.Builder.CreateBitCast(rawData, expectedArgTy);
     }
+    llvm::dbgs() << "contextvalue something maybe " << args.size() << "\n";
     args.add(argValue);
 
   // If there's a data pointer required, grab it and load out the
@@ -1103,12 +1116,16 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
                           param, origParam);
         bool isWitnessMethodCalleeSelf = (isWitnessMethodCallee &&
             origParamI + 1 == origType->getParameters().size());
+        llvm::dbgs() << "addNativeArgument " << args.size() << "\n";
         needsAllocas |= addNativeArgument(
             subIGF, origParam, origParamInfo,
             isWitnessMethodCalleeSelf ? witnessMethodSelfValue : args, false);
+        llvm::dbgs() << "post-addNativeArgument " << args.size() << "\n";
         ++origParamI;
       } else {
+        llvm::dbgs() << "claiming param " << args.size() << "\n";
         args.add(param.claimAll());
+        llvm::dbgs() << "post-claim size " << args.size() << "\n";
       }
       
     }
@@ -1131,6 +1148,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
 
   // Derive the callee function pointer.
   auto fnTy = origSig.getType()->getPointerTo();
+  llvm::dbgs() << "origSig is " << *origSig.getType() << "\n";
   FunctionPointer fnPtr = [&]() -> FunctionPointer {
     // If we found a function pointer statically, great.
     if (staticFnPtr) {
@@ -1143,6 +1161,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
 
     // The dynamic function pointer is packed "last" into the context,
     // and we pulled it out as an argument.  Just pop it off.
+    llvm::dbgs() << "taking the fnPtr from the args\n";
     auto fnPtr = args.takeLast();
 
     // It comes out of the context as an i8*. Cast to the function type.
@@ -1161,6 +1180,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
   if (haveContextArgument)
     fnContext = args.takeLast();
 
+  llvm::dbgs() << "transferring polyArgs " << polyArgs.size() << "\n";
   polyArgs.transferInto(args, polyArgs.size());
 
   // If we have a witness method call, the inner context is the
@@ -1185,8 +1205,11 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
 
   // Add the witness methods self argument before the error parameter after the
   // polymorphic arguments.
-  if (isWitnessMethodCallee)
+  if (isWitnessMethodCallee) {
+    llvm::dbgs() << "transferring witnessMethodSelfValue " << witnessMethodSelfValue.size() << "\n";
     witnessMethodSelfValue.transferInto(args, witnessMethodSelfValue.size());
+    llvm::dbgs() << "post-witnessMethodSelfValue " << args.size() << "\n";
+  }
 
   // Pass down the error result.
   if (origType->hasErrorResult()) {
@@ -1196,6 +1219,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
 
   assert(origParams.empty());
 
+  llvm::dbgs() << "isWitnessMethodCallee " << isWitnessMethodCallee << "\n";
   if (isWitnessMethodCallee) {
     assert(witnessMetadata.SelfMetadata->getType() == IGM.TypeMetadataPtrTy);
     args.add(witnessMetadata.SelfMetadata);
@@ -1203,7 +1227,10 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
     args.add(witnessMetadata.SelfWitnessTable);
   }
 
+  llvm::dbgs() << "about to create call\n";
+  llvm::dbgs() << *fwd << "\n";
   llvm::CallInst *call = subIGF.Builder.CreateCall(fnPtr, args.claimAll());
+  llvm::dbgs() << "call is " << *call << "\n";
   
   if (addressesToDeallocate.empty() && !needsAllocas &&
       (!consumesContext || !dependsOnContextLifetime))
@@ -1274,6 +1301,8 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
     SubstitutionMap subs, CanSILFunctionType origType,
     CanSILFunctionType substType, CanSILFunctionType outType, Explosion &out,
     bool isOutlined) {
+  llvm::dbgs() << "emitFunctionPartialApplication\n";
+
   // If we have a single Swift-refcounted context value, we can adopt it
   // directly as our closure context without creating a box and thunk.
   enum HasSingleSwiftRefcountedContext { Maybe, Yes, No, Thunkable }
@@ -1288,8 +1317,10 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
   auto bindings = NecessaryBindings::forFunctionInvocations(IGF.IGM,
                                                             origType, subs);
   if (!bindings.empty()) {
+    llvm::dbgs() << "polymorphic binding\n";
     hasSingleSwiftRefcountedContext = No;
     auto bindingsSize = bindings.getBufferSize(IGF.IGM);
+    llvm::dbgs() << "bindingsSize " << bindingsSize.getValue() << "\n";
     auto &bindingsTI = IGF.IGM.getOpaqueStorageTypeInfo(bindingsSize,
                                                  IGF.IGM.getPointerAlignment());
     argValTypes.push_back(SILType());
@@ -1300,6 +1331,7 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
   // Collect the type infos for the context parameters.
   for (auto param : params) {
     SILType argType = IGF.IGM.silConv.getSILType(param);
+    llvm::dbgs() << "argType " << argType << "\n";
 
     auto argLoweringTy = getArgumentLoweringType(argType.getASTType(), param);
 
@@ -1367,6 +1399,7 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
     assert(wtable->getType() == IGF.IGM.WitnessTablePtrTy);
 
     // TheRawPointerType lowers as i8*, not i8**.
+    llvm::dbgs() << "adding wtable\n";
     args.add(IGF.Builder.CreateBitCast(wtable, IGF.IGM.Int8PtrTy));
 
     argValTypes.push_back(SILType::getRawPointerType(IGF.IGM.Context));
@@ -1377,6 +1410,7 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
 
   // Otherwise, we might have a reference-counted context pointer.
   } else if (fnContext) {
+    llvm::dbgs() << "adding fnContext\n";
     args.add(fnContext);
     argValTypes.push_back(SILType::getNativeObjectType(IGF.IGM.Context));
     argConventions.push_back(origType->getCalleeConvention());
@@ -1436,6 +1470,7 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
         ParameterConvention::Indirect_InoutAliasable) {
     assert(bindings.empty());
     assert(args.size() == 1);
+    llvm::dbgs() << "doing 1\n";
 
     auto origSig = IGF.IGM.getSignature(origType);
 
@@ -1475,12 +1510,13 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
   Optional<StackAddress> stackAddr;
 
   if (args.empty() && layout.isKnownEmpty()) {
+    llvm::dbgs() << "doing 2\n";
     if (outType->isNoEscape())
       data = llvm::ConstantPointerNull::get(IGF.IGM.OpaquePtrTy);
     else
       data = IGF.IGM.RefCountedNull;
   } else {
-
+    llvm::dbgs() << "doing 3\n";
     // Allocate a new object on the heap or stack.
     HeapNonFixedOffsets offsets(IGF, layout);
     if (outType->isNoEscape()) {
@@ -1510,6 +1546,7 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
     
     // Store the context arguments.
     for (unsigned end = layout.getElements().size(); i < end; ++i) {
+      llvm::dbgs() << "herpderp 1\n";
       auto &fieldLayout = layout.getElement(i);
       auto &fieldTy = layout.getElementTypes()[i];
       Address fieldAddr = fieldLayout.project(IGF, dataAddr, offsets);
@@ -1550,6 +1587,7 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
   // Create the forwarding stub.
   auto origSig = IGF.IGM.getSignature(origType);
 
+  llvm::dbgs() << "creating forwarder\n";
   llvm::Value *forwarder = emitPartialApplicationForwarder(IGF.IGM,
                                                               staticFn,
                                                           fnContext != nullptr,
@@ -1560,6 +1598,7 @@ Optional<StackAddress> irgen::emitFunctionPartialApplication(
                                                               subs,
                                                               &layout,
                                                               argConventions);
+  llvm::dbgs() << "forwarder is " << *forwarder << "\n";
   forwarder = IGF.Builder.CreateBitCast(forwarder, IGF.IGM.Int8PtrTy);
   out.add(forwarder);
   out.add(data);
