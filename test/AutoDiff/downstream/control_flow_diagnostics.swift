@@ -1,3 +1,5 @@
+// TODO: Delete when https://github.com/apple/swift/pull/30933 is in `tensorflow`.
+
 // RUN: %target-swift-frontend -emit-sil -verify %s
 
 // Test supported `br`, `cond_br`, and `switch_enum` terminators.

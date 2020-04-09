@@ -1,3 +1,5 @@
+// TODO: Delete when https://github.com/apple/swift/pull/30933 is in `tensorflow`.
+
 // RUN: %target-swift-frontend -emit-sil -verify -Xllvm -debug-only=differentiation 2>&1 %s | %FileCheck %s -check-prefix=CHECK-DATA-STRUCTURES
 // RUN: %target-swift-frontend -emit-sil -verify -Xllvm -sil-print-after=differentiation -o /dev/null 2>&1 %s | %FileCheck %s -check-prefix=CHECK-SIL
 // REQUIRES: asserts

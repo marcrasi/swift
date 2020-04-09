@@ -1,3 +1,5 @@
+// TODO: Delete when https://github.com/apple/swift/pull/30915 is is `tensorflow`.
+
 // RUN: %target-run-simple-swift
 // NOTE(TF-813): verify that enabling forward-mode does not affect reverse-mode.
 // RUN: %target-run-simple-swift-forward-mode-differentiation

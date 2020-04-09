@@ -1,3 +1,5 @@
+// TODO: Delete when https://github.com/apple/swift/pull/30933 is in `tensorflow`.
+
 // RUN: %target-run-simple-swift
 // REQUIRES: executable_test
 
